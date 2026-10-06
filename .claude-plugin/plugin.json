@@ -1,0 +1,19 @@
+{
+  "name": "scorecard",
+  "version": "0.1.0",
+  "description": "⚾ 通用 USM Markdown 編寫 Skill 的 Claude Code 相容整合，另提供選用的 /scorecard viewer 啟動指令。",
+  "author": {
+    "name": "frontofficebrass",
+    "email": "frontofficebrass@gmail.com"
+  },
+  "keywords": [
+    "user-story-mapping",
+    "usm",
+    "scorecard",
+    "gherkin",
+    "bdd",
+    "markdown",
+    "agile"
+  ],
+  "license": "MIT"
+}

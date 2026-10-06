@@ -1,0 +1,14 @@
+{
+  "name": "scorecard-marketplace",
+  "owner": {
+    "name": "frontofficebrass",
+    "email": "frontofficebrass@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "scorecard",
+      "source": "./",
+      "description": "⚾ USM Markdown 編寫 Skill 與選用的 viewer 啟動指令；支援 host 開 viewer、agent 編輯共用檔案。"
+    }
+  ]
+}

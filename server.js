@@ -1,0 +1,163 @@
+#!/usr/bin/env node
+'use strict';
+
+/**
+ * scorecard viewer server (zero dependencies)
+ *
+ * 把 markdown 速記渲染成 User Story Map：
+ *   ## Activity（backbone 層級一）· ### Step（backbone 層級二）
+ *   - [ ] story 卡片 · <!-- ---- {名稱} --> release 泳道分隔線（收走它上方的 story）
+ *   [[wiki-link]] 連到 features/ 的 Gherkin feature 檔
+ *
+ * Usage: node server.js [map-file] [port]
+ *   map-file  markdown story map（預設 scorecard.md，找不到時退回 usm.md）
+ *   port      listen port（預設 4173）
+ *
+ * Endpoints:
+ *   GET  /                viewer UI
+ *   GET  /api/map         parsed story map as JSON (+ version for live reload)
+ *   GET  /api/feature?name=<wiki-link target>   feature file (Gherkin/md) content
+ *   POST /api/move        drag & drop: move a story card to another cell
+ *   POST /api/done        double-click: tick / untick a story card
+ *                         (both write the change back into the markdown)
+ */
+
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const { parseUsm } = require('./lib/parser');
+const { moveStory, setStoryDone, EditError } = require('./lib/writer');
+
+const ROOT = process.cwd();
+
+function defaultMapFile() {
+  if (fs.existsSync(path.resolve(ROOT, 'scorecard.md'))) return 'scorecard.md';
+  if (fs.existsSync(path.resolve(ROOT, 'usm.md'))) return 'usm.md'; // 舊檔名相容
+  return 'scorecard.md';
+}
+
+const MAP_FILE = path.resolve(ROOT, process.argv[2] || defaultMapFile());
+const PORT = Number(process.argv[3] || process.env.PORT || 4173);
+const FEATURES_DIR = path.resolve(ROOT, 'features'); // Gherkin 慣例目錄
+const FEATURE_EXTS = ['.feature', '.md', '.feature.md'];
+
+function findFeatureFile(name) {
+  // sanitize: forbid path traversal
+  if (name.includes('..') || path.isAbsolute(name)) return null;
+  const candidates = [];
+  for (const ext of FEATURE_EXTS) candidates.push(path.join(FEATURES_DIR, name + ext));
+  // also search one level of subdirectories
+  if (fs.existsSync(FEATURES_DIR)) {
+    for (const entry of fs.readdirSync(FEATURES_DIR, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        for (const ext of FEATURE_EXTS)
+          candidates.push(path.join(FEATURES_DIR, entry.name, name + ext));
+      }
+    }
+  }
+  return candidates.find((p) => fs.existsSync(p)) || null;
+}
+
+function buildMap() {
+  let md = '';
+  try {
+    md = fs.readFileSync(MAP_FILE, 'utf8');
+  } catch {
+    return { error: `找不到 ${path.relative(ROOT, MAP_FILE)}`, title: '', releases: [], activities: [], warnings: [] };
+  }
+  const map = parseUsm(md);
+  map.file = path.relative(ROOT, MAP_FILE);
+  // annotate each story with whether its wiki-linked feature file exists
+  for (const a of map.activities)
+    for (const s of a.steps)
+      for (const st of s.stories)
+        st.fileExists = st.link ? !!findFeatureFile(st.link) : null;
+  map.version = crypto.createHash('sha1').update(JSON.stringify(map)).digest('hex').slice(0, 12);
+  return map;
+}
+
+function readBody(req, limit = 1e6) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > limit) reject(new EditError('request too large', 413));
+    });
+    req.on('end', () => resolve(body));
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Apply one edit made in the viewer (a drag, a checkbox toggle) to the markdown
+ * file and answer with the resulting map.
+ *
+ * The client sends the `version` it was looking at when it made the edit; a
+ * mismatch means the file changed underneath it (an agent editing it, another
+ * browser tab, …) and the request is rejected rather than applied to a map the
+ * user never saw — line numbers would point at the wrong cards.
+ */
+async function handleEdit(req, res, edit) {
+  let body;
+  try {
+    body = JSON.parse(await readBody(req) || '{}');
+  } catch {
+    return send(res, 400, JSON.stringify({ error: 'invalid JSON body' }), 'application/json');
+  }
+  const before = buildMap();
+  if (before.error) return send(res, 404, JSON.stringify({ error: before.error }), 'application/json');
+  if (body.version && body.version !== before.version)
+    return send(res, 409, JSON.stringify({ error: 'stale version', version: before.version }), 'application/json');
+
+  try {
+    const md = fs.readFileSync(MAP_FILE, 'utf8');
+    const next = edit(md, body);
+    if (next !== md) fs.writeFileSync(MAP_FILE, next);
+  } catch (e) {
+    const status = e instanceof EditError ? e.status : 500;
+    return send(res, status, JSON.stringify({ error: String(e.message || e) }), 'application/json');
+  }
+  return send(res, 200, JSON.stringify(buildMap()), 'application/json');
+}
+
+function send(res, code, body, type) {
+  res.writeHead(code, {
+    'Content-Type': type + '; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(body);
+}
+
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/') {
+    return send(res, 200, fs.readFileSync(path.join(__dirname, 'public', 'index.html')), 'text/html');
+  }
+  if (url.pathname === '/api/map') {
+    return send(res, 200, JSON.stringify(buildMap()), 'application/json');
+  }
+  if (url.pathname === '/api/move' && req.method === 'POST') {
+    return void handleEdit(req, res, moveStory);
+  }
+  if (url.pathname === '/api/done' && req.method === 'POST') {
+    return void handleEdit(req, res, setStoryDone);
+  }
+  if (url.pathname === '/api/feature') {
+    const name = url.searchParams.get('name') || '';
+    const file = findFeatureFile(name);
+    if (!file) return send(res, 404, JSON.stringify({ error: 'not found', name }), 'application/json');
+    return send(res, 200, JSON.stringify({
+      name,
+      path: path.relative(ROOT, file),
+      content: fs.readFileSync(file, 'utf8'),
+    }), 'application/json');
+  }
+  send(res, 404, 'not found', 'text/plain');
+});
+
+// '::' = dual-stack: accepts both IPv6 and IPv4 connections; binding only
+// '0.0.0.0' breaks sandbox port publishing, which may forward over IPv6.
+server.listen(PORT, '::', () => {
+  console.log(`⚾ scorecard: http://localhost:${PORT}  (map: ${path.relative(ROOT, MAP_FILE)})`);
+});

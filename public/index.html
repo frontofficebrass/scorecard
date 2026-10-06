@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>⚾ Scorecard</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --activity: #4c6ef5;
+    --step: #74c0fc;
+    --card: #fff9c4;
+    --card-done: #d3f9d8;
+    --lane-label: #868e96;
+    --border: #dee2e6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: system-ui, "Noto Sans TC", sans-serif; background: var(--bg); color: #212529; }
+
+  header {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 12px 20px; background: #fff; border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 18px; }
+  header .file { font-size: 12px; color: var(--lane-label); font-family: ui-monospace, monospace; }
+  header .legend { margin-left: auto; font-size: 12px; color: var(--lane-label); display: flex; gap: 14px; }
+  header .legend span::before { content: "■ "; }
+  header .legend .l-todo::before  { color: #ffe066; }
+  header .legend .l-done::before  { color: #69db7c; }
+  header .legend .l-miss::before  { color: #ced4da; }
+  header .legend .l-drag::before  { content: "⠿ "; color: #adb5bd; }
+
+  #board { overflow-x: auto; padding: 20px; }
+  .grid { display: grid; gap: 8px; align-items: stretch; min-width: max-content; }
+
+  .activity, .step {
+    border-radius: 6px; padding: 8px 10px; font-weight: 600; text-align: center;
+    color: #fff; font-size: 14px;
+  }
+  .activity { background: var(--activity); }
+  .step { background: var(--step); color: #1c3d5a; font-weight: 500; font-size: 13px; }
+
+  /* The release name sits at the bottom of its lane, labelling the line below it. */
+  .lane-label {
+    display: flex; align-items: flex-end; justify-content: flex-end;
+    font-size: 12px; color: var(--lane-label);
+    font-weight: 600; padding: 0 8px 0 0; margin-bottom: -8px; text-align: right; max-width: 110px;
+    word-break: break-word; position: sticky; left: 0; background: var(--bg); z-index: 5;
+  }
+  .lane-sep { grid-column: 1 / -1; border-top: 2px dashed #ced4da; margin: 4px 0; }
+
+  .cell { display: flex; flex-direction: column; gap: 6px; min-width: 150px; min-height: 10px; }
+  .card {
+    background: var(--card); border: 1px solid #f1e05a; border-radius: 5px;
+    padding: 7px 9px; font-size: 13px; line-height: 1.35; cursor: grab;
+    box-shadow: 0 1px 2px rgba(0,0,0,.08); position: relative; max-width: 420px;
+    user-select: none;
+  }
+  .card:active { cursor: grabbing; }
+
+  /* While a card is in flight every cell must be a comfortable drop target,
+     including the empty ones that are only a few pixels tall at rest. */
+  body.dragging .cell { min-height: 34px; border-radius: 6px; }
+  body.dragging .card { cursor: grabbing; }
+  .card.dragging { opacity: .4; }
+  .cell.drop { background: rgba(76,110,245,.08); outline: 2px dashed #91a7ff; outline-offset: 2px; }
+  .drop-line { height: 3px; margin: -1.5px 0; border-radius: 2px; background: var(--activity); }
+  /* 一行放不下就截斷成「…」；滑鼠停在卡片上用 tooltip 看全文 */
+  .card .t {
+    display: block; padding-right: 14px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .card.done { background: var(--card-done); border-color: #8ce99a; }
+  .card.done .t { text-decoration: line-through; color: #495057; }
+  .card.linked { cursor: pointer; }
+  .card.linked:hover { box-shadow: 0 2px 6px rgba(0,0,0,.18); }
+  .card.missing { background: #f1f3f5; border-style: dashed; border-color: #adb5bd; color: #495057; }
+  .card .mark { position: absolute; right: 6px; top: 4px; font-size: 11px; }
+
+  #drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 92vw);
+    background: #fff; border-left: 1px solid var(--border); box-shadow: -4px 0 16px rgba(0,0,0,.12);
+    transform: translateX(102%); transition: transform .18s ease; z-index: 30;
+    display: flex; flex-direction: column;
+  }
+  #drawer.open { transform: none; }
+  #drawer .head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  #drawer .head b { font-size: 15px; }
+  #drawer .head .path { font-size: 11px; color: var(--lane-label); font-family: ui-monospace, monospace; }
+  #drawer .head button { margin-left: auto; border: none; background: none; font-size: 18px; cursor: pointer; color: #868e96; }
+  #drawer pre {
+    flex: 1; overflow: auto; margin: 0; padding: 16px;
+    font: 12.5px/1.55 ui-monospace, "SFMono-Regular", Consolas, monospace; white-space: pre-wrap;
+  }
+  .gk-kw { color: #7048e8; font-weight: 700; }
+  .gk-tag { color: #0b7285; }
+  .gk-comment { color: #adb5bd; }
+  .gk-table { color: #e8590c; }
+  .gk-string { color: #2b8a3e; }
+
+  #empty { padding: 60px 20px; text-align: center; color: var(--lane-label); font-size: 14px; }
+  #warnings { padding: 4px 20px 16px; font-size: 12px; color: #e03131; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px);
+    background: #212529; color: #fff; font-size: 13px; padding: 9px 16px; border-radius: 6px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.25); opacity: 0; pointer-events: none;
+    transition: opacity .15s ease, transform .15s ease; z-index: 40;
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">⚾ Scorecard</h1>
+  <span class="file" id="file"></span>
+  <span class="legend">
+    <span class="l-todo">待辦</span>
+    <span class="l-done">完成</span>
+    <span class="l-miss">尚無 feature 檔</span>
+    <span class="l-drag">拖曳換 release／step · 點兩下勾選完成</span>
+  </span>
+</header>
+<div id="board"></div>
+<div id="warnings"></div>
+<div id="toast"></div>
+
+<div id="drawer">
+  <div class="head">
+    <b id="d-title"></b><span class="path" id="d-path"></span>
+    <button onclick="closeDrawer()" title="關閉">✕</button>
+  </div>
+  <pre id="d-body"></pre>
+</div>
+
+<script>
+let version = null;
+
+function esc(s) {
+  return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function highlightGherkin(src) {
+  const KW = /^(\s*)(Feature|Rule|Background|Scenario Outline|Scenario Template|Scenario|Example|Examples|Given|When|Then|And|But|功能|規則|背景|場景大綱|場景|例子|假設|假如|假定|當|那麼|而且|並且|但是)(:?)/;
+  return src.split('\n').map(line => {
+    if (/^\s*#/.test(line)) return '<span class="gk-comment">' + esc(line) + '</span>';
+    if (/^\s*@/.test(line)) return '<span class="gk-tag">' + esc(line) + '</span>';
+    if (/^\s*\|/.test(line)) return '<span class="gk-table">' + esc(line) + '</span>';
+    const m = line.match(KW);
+    if (m) {
+      const rest = line.slice(m[0].length);
+      return esc(m[1]) + '<span class="gk-kw">' + esc(m[2] + m[3]) + '</span>' +
+        esc(rest).replace(/(&quot;.*?&quot;|&lt;.*?&gt;)/g, '<span class="gk-string">$1</span>');
+    }
+    return esc(line);
+  }).join('\n');
+}
+
+async function openCard(story) {
+  if (!story.link) return;
+  const drawer = document.getElementById('drawer');
+  document.getElementById('d-title').textContent = story.title;
+  const body = document.getElementById('d-body');
+  const p = document.getElementById('d-path');
+  drawer.classList.add('open');
+  try {
+    const r = await fetch('/api/feature?name=' + encodeURIComponent(story.link));
+    if (!r.ok) {
+      p.textContent = '';
+      body.innerHTML = '<span class="gk-comment"># features/ 中尚未有「' + esc(story.link) + '」的 feature 檔（Gherkin）\n# 可請 AI agent 依 scorecard.md 產生它。</span>';
+      return;
+    }
+    const data = await r.json();
+    p.textContent = data.path;
+    body.innerHTML = highlightGherkin(data.content);
+  } catch (e) {
+    body.textContent = String(e);
+  }
+}
+function closeDrawer() { document.getElementById('drawer').classList.remove('open'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+
+let toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+/* ---------- drag & drop: a card dropped in a cell is written back to markdown ---------- */
+
+// The card being dragged, as { line } — `line` is the story's line number in the
+// markdown file, which is how the server identifies it.
+let dragging = null;
+const indicator = document.createElement('div');
+indicator.className = 'drop-line';
+
+// The card the pointer is currently above the top half of: the drop lands
+// before it, or at the end of the cell when there is none.
+function cardBefore(cell, y) {
+  for (const c of cell.querySelectorAll('.card')) {
+    const r = c.getBoundingClientRect();
+    if (y < r.top + r.height / 2) return c;
+  }
+  return null;
+}
+
+function endDrag() {
+  dragging = null;
+  indicator.remove();
+  document.body.classList.remove('dragging');
+  for (const el of document.querySelectorAll('.card.dragging')) el.classList.remove('dragging');
+  for (const el of document.querySelectorAll('.cell.drop')) el.classList.remove('drop');
+}
+
+function makeDraggable(card, story) {
+  card.draggable = true;
+  card.dataset.line = story.line;
+  card.addEventListener('dragstart', e => {
+    dragging = { line: story.line };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', story.title);
+    card.classList.add('dragging');
+    document.body.classList.add('dragging');
+  });
+  card.addEventListener('dragend', endDrag);
+}
+
+function makeDropTarget(cell, stepIndex, release) {
+  cell.addEventListener('dragover', e => {
+    if (!dragging) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    cell.classList.add('drop');
+    const before = cardBefore(cell, e.clientY);
+    if (before) cell.insertBefore(indicator, before); else cell.appendChild(indicator);
+  });
+  cell.addEventListener('dragleave', e => {
+    if (cell.contains(e.relatedTarget)) return; // still inside, just crossing a card
+    cell.classList.remove('drop');
+    if (indicator.parentNode === cell) indicator.remove();
+  });
+  cell.addEventListener('drop', e => {
+    if (!dragging) return;
+    e.preventDefault();
+    const before = cardBefore(cell, e.clientY);
+    const line = dragging.line;
+    endDrag();
+    moveCard({
+      line,
+      toStep: stepIndex,
+      toRelease: release,
+      beforeLine: before ? Number(before.dataset.line) : null,
+    });
+  });
+}
+
+/* ---------- click to preview, double-click to tick ---------- */
+
+// A double-click also fires two clicks, so the preview is held back just long
+// enough to see whether a second click is coming.
+const DBLCLICK_MS = 220;
+let clickTimer = null;
+
+function bindClicks(card, story) {
+  card.addEventListener('click', () => {
+    if (!story.link) return; // nothing to preview; leave the field clear for dblclick
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => openCard(story), DBLCLICK_MS);
+  });
+  card.addEventListener('dblclick', () => {
+    clearTimeout(clickTimer);
+    toggleDone(story);
+  });
+}
+
+// Every card edit goes the same way: post it with the version we are looking
+// at, and re-render from the map the server sends back.
+async function postEdit(path, payload, what) {
+  try {
+    const r = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ version, ...payload }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      toast(r.status === 409
+        ? 'story map 已被其他人修改，畫面已更新——請再試一次'
+        : (what + '失敗：' + (data.error || r.status)));
+      if (r.status === 409) refresh();
+      return;
+    }
+    version = data.version;
+    render(data);
+  } catch (e) {
+    toast(what + '失敗：' + e);
+  }
+}
+
+const moveCard = (payload) => postEdit('/api/move', payload, '移動');
+
+// `done` is the state we want, not a toggle: if this request races with
+// anything else the outcome is still what the user saw themselves ask for.
+const toggleDone = (story) => postEdit('/api/done', { line: story.line, done: !story.done }, '勾選');
+
+function render(map) {
+  document.getElementById('title').textContent = '⚾ ' + (map.title || 'Scorecard');
+  document.getElementById('file').textContent = map.file || '';
+  document.title = '⚾ ' + (map.title || 'Scorecard');
+  const board = document.getElementById('board');
+  document.getElementById('warnings').textContent = (map.warnings || []).join('  ·  ');
+
+  if (map.error) { board.innerHTML = '<div id="empty">' + esc(map.error) + '</div>'; return; }
+
+  const steps = [];
+  for (const a of map.activities) for (const s of a.steps) steps.push({ activity: a, step: s });
+  if (!steps.length) {
+    board.innerHTML = '<div id="empty">這張 story map 是空的 — 在 ' + esc(map.file) +
+      ' 中用 ## Activity / ### Step / - [ ] [[feature]] 開始</div>';
+    return;
+  }
+
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  grid.style.gridTemplateColumns = 'minmax(60px,auto) repeat(' + steps.length + ', minmax(150px, 1fr))';
+
+  const put = (el, col, row, span) => {
+    el.style.gridColumn = span ? col + ' / span ' + span : String(col);
+    el.style.gridRow = String(row);
+    grid.appendChild(el);
+  };
+
+  // row 1: activities (spanning), row 2: steps
+  let col = 2;
+  for (const a of map.activities) {
+    if (!a.steps.length) continue;
+    const el = document.createElement('div');
+    el.className = 'activity';
+    el.textContent = a.title;
+    put(el, col, 1, a.steps.length);
+    col += a.steps.length;
+  }
+  steps.forEach((s, i) => {
+    // 沒有 ### 的 activity：step 卡從缺，卡片直接接在 ## 那一欄下面
+    if (s.step.title === null) return;
+    const el = document.createElement('div');
+    el.className = 'step';
+    el.textContent = s.step.title;
+    put(el, i + 2, 2);
+  });
+
+  // release lanes
+  const releases = map.releases.length ? map.releases : ['MVP'];
+  releases.forEach((rel, ri) => {
+    // Each lane is closed by the line below it — that line is what the release
+    // name labels, mirroring the `<!-- ---- {name} -->` separator in markdown.
+    const rowCells = 3 + ri * 2;
+    const rowSep = rowCells + 1;
+    const sep = document.createElement('div');
+    sep.className = 'lane-sep';
+    sep.style.gridRow = String(rowSep);
+    grid.appendChild(sep);
+
+    const label = document.createElement('div');
+    label.className = 'lane-label';
+    label.textContent = rel;
+    put(label, 1, rowCells);
+
+    steps.forEach((s, i) => {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      makeDropTarget(cell, i, rel);
+      for (const st of s.step.stories) {
+        if (st.release !== ri) continue;
+        const card = document.createElement('div');
+        card.className = 'card' + (st.done ? ' done' : '') +
+          (st.link ? ' linked' : '') +
+          (st.fileExists === false ? ' missing' : '');
+        card.innerHTML = '<span class="t">' + esc(st.title) + '</span>' +
+          '<span class="mark">' + (st.done ? '✅' : (st.fileExists === false ? '📄?' : (st.link ? '🔗' : ''))) + '</span>';
+        card.title = (st.link ? st.title + '\n[[' + st.link + ']] — 點擊預覽 feature' : st.title) +
+          '\n點兩下標記' + (st.done ? '未完成' : '完成') + '，拖曳可移到其他 release / step';
+        bindClicks(card, st);
+        makeDraggable(card, st);
+        cell.appendChild(card);
+      }
+      put(cell, i + 2, rowCells);
+    });
+  });
+
+  board.innerHTML = '';
+  board.appendChild(grid);
+}
+
+async function refresh() {
+  const r = await fetch('/api/map');
+  const map = await r.json();
+  version = map.version;
+  render(map);
+}
+
+async function poll() {
+  // Re-rendering mid-drag would rip the dragged card out from under the pointer.
+  if (!dragging) {
+    try {
+      const r = await fetch('/api/map');
+      const map = await r.json();
+      if (map.version !== version) {
+        version = map.version;
+        render(map);
+      }
+    } catch (e) { /* server restarting; keep polling */ }
+  }
+  setTimeout(poll, 1500);
+}
+poll();
+</script>
+</body>
+</html>
