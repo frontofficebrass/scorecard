@@ -120,3 +120,33 @@ test('source removal leaves map history intact and legacy usm.md is reused', t =
   assert.equal(cards(f.read('usm.md')).length, 2);
   assert.equal(fs.existsSync(path.join(f.root, 'scorecard.md')), false);
 });
+
+test('rejects paths outside project and source/output symlinks before writing', t => {
+  const f = fixture(t); f.ticket();
+  assert.throws(() => f.run({ map: '../outside.md' }), /專案內/);
+  fs.symlinkSync(os.tmpdir(), path.join(f.root, 'features'));
+  assert.throws(() => f.run(), /symlink/);
+  fs.unlinkSync(path.join(f.root, 'features'));
+  const source = path.join(f.root, '.scratch/search/issues/01-search.md');
+  fs.renameSync(source, path.join(f.root, 'source.md'));
+  fs.symlinkSync('../../../source.md', source);
+  assert.throws(() => f.run(), /symlink/);
+  assert.equal(fs.existsSync(path.join(f.root, 'scorecard.md')), false);
+});
+
+test('rolls back documents when publishing the map fails', t => {
+  const f = fixture(t); f.ticket(); f.run();
+  const md = f.read('scorecard.md'); const card = cards(md)[0];
+  const document = f.read(`features/${card.link}.md`);
+  f.ticket('search', '01', 'New title');
+  f.ticket('search', '02');
+  const rename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (to === path.join(f.root, 'scorecard.md')) throw new Error('simulated I/O failure');
+    return rename(from, to);
+  });
+  assert.throws(() => f.run(), /simulated I\/O failure/);
+  assert.equal(f.read('scorecard.md'), md);
+  assert.equal(f.read(`features/${card.link}.md`), document);
+  assert.deepEqual(fs.readdirSync(path.join(f.root, 'features')), [card.link + '.md']);
+});

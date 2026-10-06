@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test \"test/*.test.js\"",
+    "test": "node --test",
     "import:tickets": "node bin/import-tickets.js"
   },
   "keywords": [
@@ -41,6 +41,6 @@
     "commands/",
     ".claude-plugin/",
     "scorecard.md",
-    "features/"
+    "examples/"
   ]
 }

@@ -88,7 +88,8 @@ npx github:frontofficebrass/scorecard my-map.md 8080
 ```
 
 `npx` 會從 GitHub 取得套件、快取並啟動 viewer，不需要先做全域安裝。
-在 host 瀏覽器開啟 `http://localhost:4173`（自訂 port 時改用對應網址）。
+在 host 瀏覽器開啟 `http://127.0.0.1:4173`（自訂 port 時改用對應網址）。
+Viewer 僅接受本機存取；寫入 API 要求同來源的 JSON 請求與目前的 map version。
 Map 路徑與 `features/` 都以啟動時的工作目錄為準；自訂 map 放在子目錄時，`features/` 仍在專案根目錄。
 
 ```text
@@ -251,23 +252,36 @@ node /path/to/scorecard/bin/import-tickets.js .scratch/catalog/issues/01-search.
 - 來源刪除不會自動刪除卡片；匯入副本請勿手改或另建同名 `.feature`。來源保留原樣，沒有遠端 tracker 寫入。
 
 依賴由 Skill 在編排時考慮；GUI 不負責依賴圖、自動判斷可開始工作或派工。目前匯入為手動觸發的單向更新，沒有即時或雙向同步。`ready-for-agent` 不表示沒有阻擋依賴。
+匯入的來源、副本與 map 必須位於專案內，路徑不可經過 symlink，map 必須是獨立的 `.md` 檔案。
+一般 I/O 失敗會嘗試回復已寫入檔案；程序被強制終止或斷電不保證多檔案交易完整，修復原因後可重新匯入。
 本地 ticket 標題需為 `# NN: 標題`，編號與檔名一致，並有 `**Status:**`；卡片標題不接受 `[`、`]`、`|`。
 只有 Skill 的環境也可請 agent 依 [匯入規則](skills/scorecard/references/tickets.md) 直接編輯，不必安裝 CLI。
+
+## 完整範例
+
+根目錄的 `scorecard.md` 記錄 Scorecard 自身的功能；書店示範與對應規格位於 `examples/bookstore/`。
+在 host 執行下列命令即可預覽有規格連結的範例：
+
+```bash
+cd examples/bookstore
+node ../../server.js
+```
 
 ## 開發
 
 ```bash
-npm test        # parser / writer / tickets 測試（node:test）
+npm test        # parser / writer / tickets / server API 測試（node:test）
 ```
 
 - `lib/parser.js` — markdown → USM 結構（`activities` / `steps` / `stories` / `releases`）
 - `lib/writer.js` — 反向：把畫面上的編輯（`moveStory` / `setStoryDone`）寫回 markdown
 - `lib/tickets.js` / `bin/import-tickets.js` — 本地 tickets 匯入、來源識別與原位更新
 - `server.js` — 靜態頁 + `/api/map`、`/api/feature`、`/api/move`、`/api/done`；
-  以 cwd 解析 map 檔，綁 `::`（dual-stack）
+  以 cwd 解析 map 檔，僅監聽 `127.0.0.1`（本機）
 - `public/index.html` — 前端渲染、拖放與勾選（無框架）
 
-兩個寫入端點都吃 JSON，回傳改寫後的完整 map（與 `/api/map` 同格式）：
+兩個寫入端點都要求 `Content-Type: application/json` 與非空的 `version`；缺少版本回 400，版本過期回 409。
+請求來自瀏覽器時必須與 viewer 同來源。兩個端點回傳改寫後的完整 map（與 `/api/map` 同格式）：
 
 ```jsonc
 // POST /api/move —— 拖曳

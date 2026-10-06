@@ -38,7 +38,7 @@
 - [x] [[resolve-map-from-cwd|以 cwd 解析 map 檔與 features/]]
 <!-- ---- {MVP · markdown 變看板} -->
 - [x] [[slash-command-scorecard|/scorecard 指令啟動]]
-- [x] [[dual-stack-binding|綁 :: 讓 sandbox 也能發布 port]]
+- [x] [[loopback-binding|僅監聽本機 127.0.0.1]]
 - [x] [[legacy-usm-filename|退回讀取舊檔名 usm.md]]
 <!-- ---- {R4 · 帶到別的專案} -->
 - [ ] [[open-browser-on-start|啟動後自動開瀏覽器]]
@@ -158,6 +158,6 @@
 <!-- ---- {MVP · markdown 變看板} -->
 - [x] [[writer-unit-tests|writer 單元測試]]
 <!-- ---- {R3 · 圖上改得動} -->
-- [ ] [[server-api-tests|server 端點測試]]
+- [x] [[server-api-tests|server 端點測試]]
 <!-- ---- {R5 · 下一步} -->
 - [ ] [[browser-e2e-tests|拖曳／勾選的端對端測試]]

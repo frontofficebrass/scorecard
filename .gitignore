@@ -4,6 +4,7 @@ coverage/
 .nyc_output/
 *.tgz
 *.log
+*.tmp
 
 # Local credentials and configuration
 .env
