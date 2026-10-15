@@ -20,6 +20,8 @@ Release 是橫跨旅程的交付切片，由上到下表示交付順序，同格
 | Step：活動下的步驟，可省略 | `### 步驟` |
 | Story：待辦／完成 | `- [ ] [[feature-name]]`／`- [x] [[feature-name]]` |
 | Story 別名：顯示名稱與連結目標分開 | `- [ ] [[feature-name\|顯示名稱]]` |
+| Ticket／Markdown 文件卡片 | `- [ ] [顯示名稱](.scratch/catalog/issues/01-search.md)` |
+| 卡片筆記／附件 | 在卡片下縮排至少兩個空格；可寫多層清單、驗收 checkbox、段落、文件連結與程式碼 |
 | Release：收尾上方的一段 Story | `<!-- ---- {MVP} -->` |
 | Feature 連結：目標不含副檔名 | `[[feature-name]]` → 專案根目錄的 `features/feature-name.feature` |
 
@@ -27,8 +29,10 @@ Release 是橫跨旅程的交付切片，由上到下表示交付順序，同格
 - Release 分隔線收走**同一欄、上一條分隔線之後、這條線之前**的 Story。新增 Story 要放在目標 Release 分隔線的上方。
 - 到下一個 `###`、`##` 或檔案結尾，未被收尾的 Story 進入 **Backlog**。讓 Backlog 自動產生，不另寫 `{Backlog}` 分隔線，以保持它在最下方。
 - Release 名稱全圖共用，依首次出現排序；每個欄位都要各自收尾。空分隔線仍宣告泳道及順序，編輯時保留。
-- 一行一張卡片，標題、Story、分隔線均不縮排；分隔線獨占一行。實際 map 不要包在程式碼區塊中，區塊內容會被忽略。
+- 未縮排的 checkbox 首行建立一張卡片；接續縮排至少兩個空格（或 tab）的內容屬於該卡片，縮排 checkbox 不另建 stories。內部空白行可保留；下一個未縮排內容結束卡片區塊。移動卡片時連同整個區塊搬動。標題、Story 首行、分隔線均不縮排；分隔線獨占一行。實際 map 不要包在程式碼區塊中，區塊內容會被忽略。
 - 沒有規格連結時可用 `- [ ] 純文字故事`；有連結時保留目標的大小寫與空格，用 `|` 後的別名改顯示文字。Feature 檔可稍後補寫。
+- 標準 Markdown 文件連結相對於 map 所在目錄；例如 `maps/product.md` 連根目錄 ticket 時用 `../.scratch/catalog/issues/01-search.md`。wiki-link 仍相對於專案根目錄的 `features/`。文件必須位於專案內。
+- 同一卡片可引用多張 tickets／Markdown 文件與多份 feature，來源可放首行或縮排內文；viewer 依筆記、tickets／文件、feature 分區全部展開。只展開卡片直接引用的文件，不遞迴載入文件內的引用。來源缺失不妨礙其他內容預覽。
 
 ## 範例
 
@@ -38,6 +42,8 @@ Release 是橫跨旅程的交付切片，由上到下表示交付順序，同格
 ## 探索商品
 ### 搜尋書籍
 - [ ] [[search-by-keyword|關鍵字搜尋]]
+  - [ ] 搜尋結果符合輸入的關鍵字
+  - [搜尋工作單](.scratch/catalog/issues/01-search.md)
 <!-- ---- {MVP} -->
 - [ ] [[filter-by-author|依作者篩選]]
 <!-- ---- {Release 2} -->

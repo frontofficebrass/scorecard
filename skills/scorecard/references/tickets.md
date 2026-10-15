@@ -41,18 +41,29 @@ scorecard-import .scratch/catalog/issues --activity '尋找書籍' --step '搜�
 
 可用 `--map maps/product.md` 指定 map；預設沿用 `scorecard.md`，其次 `usm.md`。`features/` 仍在工作目錄根部。此指令只寫檔，不會啟動 viewer。CLI 將新卡放入 Backlog；執行後，Skill 仍需依前述規則完成 Release 編排。
 
-指令使用 `<feature-slug>/<去除前導零的編號>` 作為穩定 ID；例如 `catalog/1`。wiki-link 為 `ticket-` 加上 ID 的 SHA-256 十六進位雜湊前 24 字元。標題或檔名 slug 更名仍是同一張卡，feature 目錄或編號改變則是新 ID。
+指令使用 `<feature-slug>/<去除前導零的編號>` 作為穩定 ID；例如 `catalog/1`。ID 從卡片首行的 ticket 文件路徑辨識。標題或檔名 slug 更名仍是同一張卡，feature 目錄或編號改變則是新 ID。
 
-匯入到 `features/<wiki-link>.md`，首行是 `<!-- scorecard-ticket: <encodeURIComponent(ID)> -->`，接著保留 Source 路徑、Ticket-ID 與完整來源內容。不要另建同名 `.feature`，它會遮蔽 `.md`。這些文件是匯入副本，請修改來源後重匯。
+新卡片直接連原始 ticket，不建立副本：
+
+```markdown
+- [ ] [以關鍵字搜尋書籍](.scratch/catalog/issues/01-search.md)
+```
+
+連結相對於 map 所在目錄；map 在 `maps/product.md` 時，路徑為 `../.scratch/catalog/issues/01-search.md`。路徑中的空格、`#`、括號等特殊字元需 URL 編碼；標題中的 Markdown 語法字元需跳脫。Viewer 直接讀來源完整內容（包含驗收條件與 Blocked by），修改來源後預覽會更新，不必重匯。
+
+卡片下可縮排補充筆記、驗收條目和其他文件連結。附在子條目中的 ticket 是補充來源，不作為父卡片的匯入身分，也不依附件狀態更新父卡片。一張 ticket 一張卡仍是匯入預設；人工也可在同一卡片引用多張 tickets，預覽會全部展開。
+
+舊版 `[[ticket-<hash>]]` 仍可預覽：viewer 依副本首行的 `scorecard-ticket` 標記與 `Source` 讀原始文件；原檔不可讀時顯示副本內文，並標示「匯入快照／來源不存在」。重匯可將舊卡原位轉為直接連結，保留舊副本，不自動刪除。舊 wiki-link 是 `ticket-` 加上 ID 的 SHA-256 十六進位雜湊前 24 字元；遷移前必須確認既有副本有相符的來源標記。
 
 ## 再次匯入
 
-- 以穩定 wiki-link 找既有卡片，只更新標題和完成勾選；保留欄位、Release、排序和其他卡片。
+- 以穩定 ID 找首行連到該 ticket 的既有卡片（亦辨識舊 wiki-link），只更新標題、來源連結和完成勾選；保留縮排內文、欄位、Release、排序和其他卡片。檔名 slug 更名後重匯會修正連結；不以標題模糊配對。
 - 來源 Status 為 `done`、`completed`、`closed`、`resolved`（不區分大小寫）時勾選，其餘為未完成。驗收條件勾選不代替 Status。
 - Viewer 的勾選只改 map，不回寫 ticket；下次匯入會恢復來源狀態。要持續保存完成狀態，修改來源 Status 再匯入。
+- 即時更新的是預覽內容；修改來源 Status 不會自行改寫 map 的完成勾選。驗收 checkbox 在預覽中供閱讀，不回寫來源。
 - 移除來源檔不自動刪卡或刪規格，保留歷史；需要移除時依使用者要求處理。
 - Blocked by 原文保留，供 Skill 編排 Release 與讀者查閱；GUI 不計算「可開始」，也不自動安排執行工作。`ready-for-agent` 不代表沒有 blockers。
 
 ## 只有 Skill、沒有 CLI 時
 
-Skill 可獨立使用，不要求安裝 Node.js。依上面的 ID 與文件規則，使用環境可用的 SHA-256 工具取得 wiki-link，直接編輯 map 和副本即可；套用相同的重匯規則，每次寫入前重讀，拒絕覆蓋沒有相符來源標記的同名文件。不要把 ticket 驗收 checkbox 逐項匯入為 stories，整張 ticket 才是一張卡。
+Skill 可獨立使用，不要求安裝 Node.js。依上面的 ID 與連結規則直接編輯 map 即可，不建立副本；套用相同的重匯與舊卡遷移規則，每次寫入前重讀。不要把 ticket 驗收 checkbox 逐項匯入為 stories，整張 ticket 才是一張卡。

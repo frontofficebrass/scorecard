@@ -27,32 +27,32 @@ function fixture(t) {
 }
 const cards = md => parseUsm(md).activities.flatMap(a => a.steps.flatMap(s => s.stories));
 
-test('imports full ticket into viewer-readable document and is byte-for-byte idempotent', t => {
+test('imports direct ticket links without copies and is byte-for-byte idempotent', t => {
   const f = fixture(t); const source = f.ticket();
   assert.equal(f.run().added, 1);
   const md = f.read('scorecard.md'); const [card] = cards(md);
   assert.equal(card.title, '搜尋'); assert.equal(card.done, false);
   assert.equal(parseUsm(md).releases[card.release], 'Backlog');
-  const doc = f.read(`features/${card.link}.md`);
-  assert.ok(doc.includes(`Source: ${source}`));
-  assert.ok(doc.endsWith(f.read(source)));
+  const original = f.read(source);
+  assert.equal(card.primary.target, source);
+  assert.equal(fs.existsSync(path.join(f.root, 'features')), false);
   assert.deepEqual(f.run(), { added: 0, updated: 1, map: 'scorecard.md' });
   assert.equal(f.read('scorecard.md'), md);
-  assert.equal(f.read(`features/${card.link}.md`), doc);
+  assert.equal(f.read(source), original);
 });
 
 test('reimport after drag preserves placement, release, order and surrounding text; updates source state', t => {
   const f = fixture(t); f.ticket(); f.run();
-  let md = f.read('scorecard.md') + '\n## 購買\n### 結帳\n- [x] [[existing]]\n<!-- ---- {MVP} -->\n';
+  let md = f.read('scorecard.md').replace('01-search.md)\n', '01-search.md)\n  - [ ] 人工補充\n') + '\n## 購買\n### 結帳\n- [x] [[existing]]\n<!-- ---- {MVP} -->\n';
   const card = cards(md)[0];
   md = moveStory(md, { line: card.line, toStep: 1, toRelease: 'MVP' });
   f.write('scorecard.md', md);
   fs.renameSync(path.join(f.root, '.scratch/search/issues/01-search.md'), path.join(f.root, '.scratch/search/issues/01-renamed.md'));
   f.ticket('search', '01', '搜尋新標題', 'completed', 'renamed');
   f.run({ activity: '不應新增', step: '不應新增' });
-  const expected = md.replace(`- [ ] [[${card.link}|搜尋]]`, `- [x] [[${card.link}|搜尋新標題]]`);
+  const expected = md.replace('- [ ] [搜尋](.scratch/search/issues/01-search.md)', '- [x] [搜尋新標題](.scratch/search/issues/01-renamed.md)');
   assert.equal(f.read('scorecard.md'), expected);
-  assert.ok(f.read(`features/${card.link}.md`).includes('01-renamed.md'));
+  assert.equal(cards(expected).find(s => s.primary?.kind === 'document')?.bodyMarkdown, '- [ ] 人工補充');
 });
 
 test('new tickets enter existing column Backlog and keep CRLF; same number in different features is unique', t => {
@@ -65,7 +65,7 @@ test('new tickets enter existing column Backlog and keep CRLF; same number in di
   const map = parseUsm(md);
   const stories = map.activities[0].steps[0].stories;
   assert.equal(stories.length, 3);
-  assert.equal(new Set(stories.map(s => s.link)).size, 3);
+  assert.equal(new Set(stories.map(s => s.primary?.target || s.link)).size, 3);
   assert.deepEqual(stories.map(s => map.releases[s.release]), ['MVP', 'Backlog', 'Backlog']);
 });
 
@@ -89,14 +89,14 @@ test('invalid batch and duplicate IDs do not write output', t => {
   assert.equal(fs.existsSync(path.join(f.root, 'scorecard.md')), false);
 });
 
-test('protects unrelated documents and rejects duplicate card identities', t => {
+test('leaves unrelated documents untouched and rejects duplicate primary ticket identities', t => {
   const f = fixture(t); f.ticket(); f.run();
   const md = f.read('scorecard.md'); const card = cards(md)[0];
-  f.write(`features/${card.link}.md`, 'hand-written');
-  assert.throws(() => f.run(), /拒絕覆蓋/);
+  f.write('features/unrelated.md', 'hand-written');
+  f.run();
+  assert.equal(f.read('features/unrelated.md'), 'hand-written');
   assert.equal(f.read('scorecard.md'), md);
-  fs.unlinkSync(path.join(f.root, `features/${card.link}.md`));
-  f.write('scorecard.md', md + `\n- [ ] [[${card.link}]]\n`);
+  f.write('scorecard.md', md + `\n- [ ] [重複](${card.primary.target})\n`);
   assert.throws(() => f.run(), /重複 ticket 卡片/);
 });
 
@@ -106,6 +106,7 @@ test('CLI works from a project cwd with custom map and one ticket, without start
   const output = execFileSync(process.execPath, [cli, source, '--activity', '探索', '--step', '搜尋', '--map', 'maps/book.md'], { cwd: f.root, encoding: 'utf8' });
   assert.match(output, /新增 1 張/);
   assert.equal(cards(f.read('maps/book.md')).length, 1);
+  assert.equal(cards(f.read('maps/book.md'))[0].primary.target, '../' + source);
   assert.equal(fs.existsSync(path.join(f.root, 'scorecard.md')), false);
   const bad = spawnSync(process.execPath, [cli, source, '--typo'], { cwd: f.root, encoding: 'utf8' });
   assert.equal(bad.status, 1);
@@ -124,9 +125,9 @@ test('source removal leaves map history intact and legacy usm.md is reused', t =
 test('rejects paths outside project and source/output symlinks before writing', t => {
   const f = fixture(t); f.ticket();
   assert.throws(() => f.run({ map: '../outside.md' }), /專案內/);
-  fs.symlinkSync(os.tmpdir(), path.join(f.root, 'features'));
-  assert.throws(() => f.run(), /symlink/);
-  fs.unlinkSync(path.join(f.root, 'features'));
+  fs.symlinkSync(os.tmpdir(), path.join(f.root, 'maps'));
+  assert.throws(() => f.run({ map: 'maps/scorecard.md' }), /symlink/);
+  fs.unlinkSync(path.join(f.root, 'maps'));
   const source = path.join(f.root, '.scratch/search/issues/01-search.md');
   fs.renameSync(source, path.join(f.root, 'source.md'));
   fs.symlinkSync('../../../source.md', source);
@@ -134,12 +135,12 @@ test('rejects paths outside project and source/output symlinks before writing', 
   assert.equal(fs.existsSync(path.join(f.root, 'scorecard.md')), false);
 });
 
-test('rolls back documents when publishing the map fails', t => {
+test('failed atomic publication preserves the map and original tickets without temporary files', t => {
   const f = fixture(t); f.ticket(); f.run();
   const md = f.read('scorecard.md'); const card = cards(md)[0];
-  const document = f.read(`features/${card.link}.md`);
   f.ticket('search', '01', 'New title');
   f.ticket('search', '02');
+  const original = f.read('.scratch/search/issues/01-search.md');
   const rename = fs.renameSync;
   t.mock.method(fs, 'renameSync', (from, to) => {
     if (to === path.join(f.root, 'scorecard.md')) throw new Error('simulated I/O failure');
@@ -147,6 +148,42 @@ test('rolls back documents when publishing the map fails', t => {
   });
   assert.throws(() => f.run(), /simulated I\/O failure/);
   assert.equal(f.read('scorecard.md'), md);
-  assert.equal(f.read(`features/${card.link}.md`), document);
-  assert.deepEqual(fs.readdirSync(path.join(f.root, 'features')), [card.link + '.md']);
+  assert.equal(f.read('.scratch/search/issues/01-search.md'), original);
+  assert.equal(fs.existsSync(path.join(f.root, 'features')), false);
+  assert.ok(!fs.readdirSync(f.root).some(name => name.endsWith('.tmp')));
+});
+
+test('migrates legacy cards in place while leaving their snapshot intact', t => {
+  const f = fixture(t); const source = f.ticket();
+  const identity = 'search/1';
+  const link = 'ticket-' + require('crypto').createHash('sha256').update(identity).digest('hex').slice(0, 24);
+  const snapshot = `<!-- scorecard-ticket: search%2F1 -->\n\nSource: ${source}\nTicket-ID: ${identity}\n\n${f.read(source)}`;
+  f.write(`features/${link}.md`, snapshot);
+  f.write('scorecard.md', `## 探索\n### 搜尋\n* [ ]   [[${link}|舊標題]] 尾巴\n  - 人工筆記\n<!-- {MVP} -->\n`);
+  assert.deepEqual(f.run(), { added: 0, updated: 1, map: 'scorecard.md' });
+  assert.match(f.read('scorecard.md'), /\* \[ \]   \[搜尋\]\(.scratch\/search\/issues\/01-search.md\) 尾巴\n  - 人工筆記/);
+  assert.equal(f.read(`features/${link}.md`), snapshot);
+});
+
+test('ticket attachments do not identify or overwrite their parent card', t => {
+  const f = fixture(t); const source = f.ticket();
+  const link = 'ticket-' + require('crypto').createHash('sha256').update('search/1').digest('hex').slice(0, 24);
+  const parent = `## 探索\n### 搜尋\n- [x] [父卡片](docs/overview.md) [[${link}|附件]]\n  - [附件](${source})\n<!-- {MVP} -->\n`;
+  f.write('scorecard.md', parent);
+  assert.equal(f.run().added, 1);
+  assert.ok(f.read('scorecard.md').startsWith(parent));
+  assert.equal(cards(f.read('scorecard.md'))[0].done, true);
+});
+
+test('direct links preserve literal titles and encode special characters in source paths', t => {
+  const f = fixture(t);
+  const title = '搜尋 *作者* &lt;name&gt;';
+  const source = f.ticket('search # beta', '01', title, 'ready-for-agent', 'filter(one)');
+  f.run({ source });
+  const md = f.read('scorecard.md');
+  assert.equal(cards(md)[0].title, title);
+  assert.equal(cards(md)[0].primary.target, source);
+  assert.match(md, /search%20%23%20beta\/issues\/01-filter%28one%29.md/);
+  f.run({ source });
+  assert.equal(f.read('scorecard.md'), md);
 });

@@ -77,6 +77,7 @@
   .card.linked:hover { box-shadow: 0 2px 6px rgba(0,0,0,.18); }
   .card.missing { background: #f1f3f5; border-style: dashed; border-color: #adb5bd; color: #495057; }
   .card .mark { position: absolute; right: 6px; top: 4px; font-size: 11px; }
+  .card .sources { display: block; margin-top: 4px; font-size: 10px; color: #687076; }
 
   #drawer {
     position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 92vw);
@@ -89,10 +90,31 @@
   #drawer .head b { font-size: 15px; }
   #drawer .head .path { font-size: 11px; color: var(--lane-label); font-family: ui-monospace, monospace; }
   #drawer .head button { margin-left: auto; border: none; background: none; font-size: 18px; cursor: pointer; color: #868e96; }
-  #drawer pre {
-    flex: 1; overflow: auto; margin: 0; padding: 16px;
+  #d-body { flex: 1; overflow: auto; padding: 0 16px 20px; }
+  .preview-section { padding: 18px 0; border-bottom: 1px solid var(--border); scroll-margin-top: 12px; }
+  .preview-section h2 { font-size: 14px; margin-bottom: 5px; }
+  .source-path { display: block; overflow-wrap: anywhere; margin-bottom: 12px; color: #687076; font: 11px ui-monospace, monospace; }
+  .preview-error, .preview-note { font-size: 12px; line-height: 1.6; color: #a15c00; margin: 8px 0; }
+  .preview-empty { padding: 20px 0; color: #687076; }
+  .markdown { font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+  .markdown p, .markdown ul, .markdown ol, .markdown pre, .markdown blockquote, .markdown table { margin: 9px 0; }
+  .markdown ul, .markdown ol { padding-left: 24px; }
+  .markdown li > p { margin: 3px 0; }
+  .markdown h1 { font-size: 20px; margin: 14px 0 8px; }
+  .markdown h2 { font-size: 17px; margin: 14px 0 8px; }
+  .markdown h3, .markdown h4, .markdown h5, .markdown h6 { font-size: 14px; margin: 12px 0 6px; }
+  .markdown a { color: #4263eb; }
+  .markdown input[type=checkbox] { margin-right: 6px; vertical-align: middle; }
+  .markdown blockquote { border-left: 3px solid var(--border); padding-left: 12px; color: #687076; }
+  .markdown table { border-collapse: collapse; display: block; overflow: auto; }
+  .markdown th, .markdown td { border: 1px solid var(--border); padding: 5px 8px; }
+  .markdown img { max-width: 100%; }
+  .markdown :not(pre) > code { background: #f1f3f5; padding: 1px 4px; border-radius: 3px; }
+  .markdown pre, .gherkin {
+    overflow: auto; margin: 10px 0; padding: 12px; background: #f8f9fa; border-radius: 4px;
     font: 12.5px/1.55 ui-monospace, "SFMono-Regular", Consolas, monospace; white-space: pre-wrap;
   }
+  .markdown pre code { font: inherit; }
   .gk-kw { color: #7048e8; font-weight: 700; }
   .gk-tag { color: #0b7285; }
   .gk-comment { color: #adb5bd; }
@@ -118,7 +140,7 @@
   <span class="legend">
     <span class="l-todo">待辦</span>
     <span class="l-done">完成</span>
-    <span class="l-miss">尚無 feature 檔</span>
+    <span class="l-miss">尚無可預覽內容</span>
     <span class="l-drag">拖曳換 release／step · 點兩下勾選完成</span>
   </span>
 </header>
@@ -131,14 +153,18 @@
     <b id="d-title"></b><span class="path" id="d-path"></span>
     <button onclick="closeDrawer()" title="關閉">✕</button>
   </div>
-  <pre id="d-body"></pre>
+  <div id="d-body"></div>
 </div>
 
+<script src="/vendor/markdown-it.js"></script>
 <script>
 let version = null;
+let viewVersion = null;
+let opened = null;
+let previewRequest = 0;
 
 function esc(s) {
-  return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
 
 function highlightGherkin(src) {
@@ -157,28 +183,106 @@ function highlightGherkin(src) {
   }).join('\n');
 }
 
-async function openCard(story) {
-  if (!story.link) return;
+function documentPath(href, basePath) {
+  if (!href || /^(?:[a-z][a-z\d+.-]*:|\/|#)/i.test(href)) return null;
+  let target;
+  try { target = decodeURIComponent(href.split(/[?#]/)[0]); } catch { return null; }
+  if (!/\.(md|feature)$/i.test(target) || /[\0\\]/.test(target)) return null;
+  const parts = basePath.split('/').slice(0, -1);
+  for (const part of target.split('/')) {
+    if (part === '..') { if (!parts.length) return null; parts.pop(); }
+    else if (part && part !== '.') parts.push(part);
+  }
+  return parts.join('/');
+}
+
+const markdown = window.markdownit({ html: false, highlight: (code, language) =>
+  /^(gherkin|feature)$/i.test(language) ? '<pre class="gherkin"><code>' + highlightGherkin(code) + '</code></pre>' : '' });
+markdown.core.ruler.after('inline', 'task-checkboxes', state => {
+  state.tokens.forEach((token, index) => {
+    if (token.type !== 'inline' || state.tokens[index - 2]?.type !== 'list_item_open') return;
+    const first = token.children[0];
+    const match = first?.type === 'text' && first.content.match(/^\[([ xX])\]\s+/);
+    if (!match) return;
+    first.content = first.content.slice(match[0].length);
+    const checkbox = new state.Token('html_inline', '', 0);
+    checkbox.content = '<input type="checkbox" disabled' + (match[1].toLowerCase() === 'x' ? ' checked' : '') + '>';
+    token.children.unshift(checkbox);
+  });
+});
+const defaultLinkOpen = markdown.renderer.rules.link_open || ((tokens, index, options, env, renderer) => renderer.renderToken(tokens, index, options));
+markdown.renderer.rules.link_open = (tokens, index, options, env, renderer) => {
+  const token = tokens[index];
+  const href = token.attrGet('href');
+  const target = documentPath(href, env.basePath);
+  if (target) {
+    const section = env.sections.findIndex(s => s.kind !== 'notes' && s.path === target);
+    token.attrSet('href', section >= 0 ? '#source-' + section : '/api/document?path=' + encodeURIComponent(target));
+    if (section < 0) token.attrSet('target', '_blank');
+  } else if (!href?.startsWith('#') && !/^(https?:|mailto:)/i.test(href || '')) {
+    // Unsupported local files are displayed as links without issuing a file request.
+    token.attrSet('href', '#');
+  } else if (/^(https?:|mailto:)/i.test(href || '')) token.attrSet('target', '_blank');
+  token.attrSet('rel', 'noopener noreferrer');
+  return defaultLinkOpen(tokens, index, options, env, renderer);
+};
+
+function renderSections(sections) {
+  if (!sections.length) return '<p class="preview-empty">這張卡片尚無補充內容。</p>';
+  const labels = { notes: '卡片筆記', ticket: 'Ticket', document: '補充文件', feature: 'Feature 規格' };
+  return sections.map((section, index) => {
+    const title = section.kind === 'notes' ? labels.notes : labels[section.kind] + '：' + section.title;
+    const source = section.path ? '<a class="source-path" target="_blank" rel="noopener noreferrer" href="/api/document?path=' +
+      encodeURIComponent(section.path) + '">' + esc(section.path) + '</a>' : '<span class="source-path">' + esc(section.target) + '</span>';
+    const note = section.note ? '<p class="preview-note">' + esc(section.note) + '</p>' : '';
+    const content = section.error ? '<p class="preview-error">' + esc(section.error) + '</p>' : section.format === 'gherkin'
+      ? '<pre class="gherkin">' + highlightGherkin(section.content) + '</pre>'
+      : '<div class="markdown">' + markdown.render(section.content, { basePath: section.path, sections }) + '</div>';
+    return '<section class="preview-section" id="source-' + index + '"><h2>' + esc(title) + '</h2>' + source + note + content + '</section>';
+  }).join('');
+}
+
+const storyIdentity = story => JSON.stringify([story.title, story.primary?.kind, story.primary?.target, story.link]);
+
+async function openCard(story, preserveScroll = false) {
+  const request = ++previewRequest;
+  const mapVersion = version;
   const drawer = document.getElementById('drawer');
   document.getElementById('d-title').textContent = story.title;
   const body = document.getElementById('d-body');
   const p = document.getElementById('d-path');
+  const scrollTop = preserveScroll ? body.scrollTop : 0;
+  opened = { line: story.line, version: mapVersion, identity: storyIdentity(story), previewVersion: story.previewVersion };
   drawer.classList.add('open');
+  if (!preserveScroll) { body.textContent = '載入中…'; body.scrollTop = 0; }
+  p.textContent = '';
   try {
-    const r = await fetch('/api/feature?name=' + encodeURIComponent(story.link));
+    const r = await fetch('/api/card?line=' + story.line + '&version=' + encodeURIComponent(mapVersion));
+    if (request !== previewRequest) return;
     if (!r.ok) {
-      p.textContent = '';
-      body.innerHTML = '<span class="gk-comment"># features/ 中尚未有「' + esc(story.link) + '」的 feature 檔（Gherkin）\n# 可請 AI agent 依 scorecard.md 產生它。</span>';
+      if (r.status === 409) { closeDrawer(); toast('卡片已變動，畫面已更新，請重新選取'); await refresh(); }
+      else { body.textContent = '無法載入卡片內容（' + r.status + '）'; opened.previewVersion = null; }
       return;
     }
     const data = await r.json();
-    p.textContent = data.path;
-    body.innerHTML = highlightGherkin(data.content);
+    if (request !== previewRequest) return;
+    p.textContent = data.file + ':' + data.line;
+    body.innerHTML = renderSections(data.sections);
+    body.scrollTop = scrollTop;
+    opened.previewVersion = data.previewVersion;
   } catch (e) {
-    body.textContent = String(e);
+    if (request === previewRequest) { body.textContent = String(e); opened.previewVersion = null; }
   }
 }
-function closeDrawer() { document.getElementById('drawer').classList.remove('open'); }
+function closeDrawer() { opened = null; previewRequest++; document.getElementById('drawer').classList.remove('open'); }
+
+function syncDrawer(map) {
+  if (!opened) return;
+  const matches = map.activities.flatMap(a => a.steps.flatMap(s => s.stories)).filter(st => storyIdentity(st) === opened.identity);
+  const story = opened.version === map.version ? matches.find(st => st.line === opened.line) : matches.length === 1 ? matches[0] : null;
+  if (!story) return closeDrawer();
+  if (opened.version !== map.version || opened.previewVersion !== story.previewVersion) openCard(story, true);
+}
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
 
 let toastTimer = null;
@@ -267,7 +371,7 @@ let clickTimer = null;
 
 function bindClicks(card, story) {
   card.addEventListener('click', () => {
-    if (!story.link) return; // nothing to preview; leave the field clear for dblclick
+    if (!story.preview.available && !story.preview.missing) return;
     clearTimeout(clickTimer);
     clickTimer = setTimeout(() => openCard(story), DBLCLICK_MS);
   });
@@ -294,7 +398,6 @@ async function postEdit(path, payload, what) {
       if (r.status === 409) refresh();
       return;
     }
-    version = data.version;
     render(data);
   } catch (e) {
     toast(what + '失敗：' + e);
@@ -308,6 +411,10 @@ const moveCard = (payload) => postEdit('/api/move', payload, '移動');
 const toggleDone = (story) => postEdit('/api/done', { line: story.line, done: !story.done }, '勾選');
 
 function render(map) {
+  if (map.version !== version) { clearTimeout(clickTimer); clickTimer = null; }
+  version = map.version;
+  viewVersion = map.viewVersion;
+  if (!map.error) syncDrawer(map); else closeDrawer();
   document.getElementById('title').textContent = '⚾ ' + (map.title || 'Scorecard');
   document.getElementById('file').textContent = map.file || '';
   document.title = '⚾ ' + (map.title || 'Scorecard');
@@ -377,12 +484,17 @@ function render(map) {
       for (const st of s.step.stories) {
         if (st.release !== ri) continue;
         const card = document.createElement('div');
+        const hasPreview = st.preview.available || st.preview.missing;
+        const missing = !st.preview.available && st.preview.missing;
+        const sources = [st.preview.notes ? '筆記' : '', st.preview.tickets ? st.preview.tickets + ' tickets' : '',
+          st.preview.documents ? st.preview.documents + ' 文件' : '', st.preview.features ? '規格' : '',
+          st.preview.missing ? st.preview.missing + ' 來源待補' : ''].filter(Boolean).join(' · ');
         card.className = 'card' + (st.done ? ' done' : '') +
-          (st.link ? ' linked' : '') +
-          (st.fileExists === false ? ' missing' : '');
+          (hasPreview ? ' linked' : '') + (missing ? ' missing' : '');
         card.innerHTML = '<span class="t">' + esc(st.title) + '</span>' +
-          '<span class="mark">' + (st.done ? '✅' : (st.fileExists === false ? '📄?' : (st.link ? '🔗' : ''))) + '</span>';
-        card.title = (st.link ? st.title + '\n[[' + st.link + ']] — 點擊預覽 feature' : st.title) +
+          '<span class="mark">' + (st.done ? '✅' : missing ? '📄?' : hasPreview ? '🔗' : '') + '</span>' +
+          (sources ? '<span class="sources">' + esc(sources) + '</span>' : '');
+        card.title = st.title + (hasPreview ? '\n點擊預覽：' + sources : '') +
           '\n點兩下標記' + (st.done ? '未完成' : '完成') + '，拖曳可移到其他 release / step';
         bindClicks(card, st);
         makeDraggable(card, st);
@@ -399,7 +511,6 @@ function render(map) {
 async function refresh() {
   const r = await fetch('/api/map');
   const map = await r.json();
-  version = map.version;
   render(map);
 }
 
@@ -409,9 +520,10 @@ async function poll() {
     try {
       const r = await fetch('/api/map');
       const map = await r.json();
-      if (map.version !== version) {
-        version = map.version;
+      if (map.viewVersion !== viewVersion) {
         render(map);
+      } else if (opened && opened.previewVersion === null) {
+        syncDrawer(map);
       }
     } catch (e) { /* server restarting; keep polling */ }
   }

@@ -1,7 +1,7 @@
 {
   "name": "scorecard",
   "version": "0.1.0",
-  "description": "⚾ Markdown quick-notes → User Story Mapping viewer, with [[wiki-link]] cards pointing at Gherkin feature files",
+  "description": "⚾ Markdown User Story Map viewer with card notes, local tickets and Gherkin previews",
   "main": "server.js",
   "bin": {
     "scorecard": "./server.js",
@@ -42,5 +42,8 @@
     ".claude-plugin/",
     "scorecard.md",
     "examples/"
-  ]
+  ],
+  "dependencies": {
+    "markdown-it": "^14.3.2"
+  }
 }

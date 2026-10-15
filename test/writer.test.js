@@ -286,3 +286,31 @@ test('rejects an unknown column and a release name that would break the separato
   assert.throws(() => moveStory(SAMPLE, { line, toStep: 0, toRelease: '' }), EditError);
   assert.throws(() => moveStory(SAMPLE, { line, toStep: 0, toRelease: 'a} --> b' }), EditError);
 });
+
+test('moves complete card blocks after target children and preserves CRLF', () => {
+  const body = '  - [ ] 子條目\r\n    - 第二層\r\n\r\n  ```markdown\r\n  - [ ] [[example]]\r\n  ```';
+  const md = '## A\r\n### S1\r\n- [ ] [[a]]\r\n' + body + '\r\n<!-- {MVP} -->\r\n### S2\r\n- [ ] [[b]]\r\n  - 目標卡內文\r\n<!-- {MVP} -->\r\n';
+  const out = moveStory(md, { line: 3, toStep: 1, toRelease: 'MVP' });
+  assert.ok(out.includes('- [ ] [[b]]\r\n  - 目標卡內文\r\n- [ ] [[a]]\r\n' + body + '\r\n<!-- {MVP} -->'));
+  assert.ok(!/(?<!\r)\n/.test(out));
+  const stories = parseUsm(out).activities[0].steps;
+  assert.equal(stories[0].stories.length, 0);
+  assert.deepEqual(stories[1].stories.map(s => s.link), ['b', 'a']);
+});
+
+test('reorders a complete card before another block and can create a release for it', () => {
+  const md = '## A\n- [ ] [[a]]\n  - A\n- [ ] [[b]]\n  - B\n';
+  const out = moveStory(md, { line: 4, toStep: 0, toRelease: 'Backlog', beforeLine: 2 });
+  assert.equal(out, '## A\n- [ ] [[b]]\n  - B\n- [ ] [[a]]\n  - A\n');
+  assert.equal(moveStory(out, { line: 2, toStep: 0, toRelease: 'Backlog', beforeLine: 2 }), out);
+  const released = moveStory(md, { line: 4, toStep: 0, toRelease: 'R1' });
+  assert.equal(placement(released).b, '0/R1');
+  assert.match(released, /- \[ \] \[\[b\]\]\n  - B\n<!-- ---- \{R1\} -->/);
+});
+
+test('toggling a parent leaves child checkboxes intact and rejects fenced examples', () => {
+  const md = '## A\n- [ ] 父卡片\n  - [ ] 子條目\n```\n- [ ] 範例\n```\n';
+  assert.equal(setStoryDone(md, { line: 2, done: true }), md.replace('- [ ] 父', '- [x] 父'));
+  assert.throws(() => setStoryDone(md, { line: 3, done: true }), EditError);
+  assert.throws(() => setStoryDone(md, { line: 5, done: true }), EditError);
+});

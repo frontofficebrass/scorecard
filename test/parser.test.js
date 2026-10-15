@@ -161,3 +161,36 @@ test('warns on orphan stories', () => {
   assert.equal(m.activities.length, 0);
   assert.equal(m.warnings.length, 1);
 });
+
+test('indented children stay in one card, preserving Markdown and internal blank lines', () => {
+  const m = parseUsm('## A\n- [ ] 父卡片\n  - [x] 條件\n    - 更深一層\n\n  補充段落\n\n<!-- {MVP} -->\n- [ ] 下一張\n');
+  const stories = m.activities[0].steps[0].stories;
+  assert.equal(stories.length, 2);
+  assert.equal(stories[0].bodyMarkdown, '- [x] 條件\n  - 更深一層\n\n補充段落');
+  assert.equal(stories[0].endLine, 6);
+  assert.equal(m.releases[stories[0].release], 'MVP');
+  assert.equal(m.releases[stories[1].release], 'Backlog');
+});
+
+test('collects multiple document and feature sources, excluding code and images', () => {
+  const m = parseUsm('## A\n- [ ] [[search|搜尋]] [Ticket](.scratch/catalog/issues/01-search.md)\n' +
+    '  - [另一份](<docs/extra notes.md>)\n  - [[details|詳細規格]]\n  - `[[inline-example]]`\n' +
+    '  - ![image](image.md)\n  - \\[[escaped-example]]\n  - [網站](https://example.com/spec.md)\n  ```markdown\n' +
+    '  ### 範例\n  - [ ] [[code-example]]\n  <!-- {不是泳道} -->\n  ```\n- [ ] 下一張\n');
+  const stories = m.activities[0].steps[0].stories;
+  assert.equal(stories.length, 2);
+  assert.deepEqual(stories[0].sources.map(s => s.target), ['search', '.scratch/catalog/issues/01-search.md', 'docs/extra notes.md', 'details']);
+  assert.deepEqual(m.releases, ['Backlog']);
+});
+
+test('a direct ticket link supplies a title without requiring a feature', () => {
+  const story = parseUsm('## A\n- [ ] [搜尋](.scratch/catalog/issues/01-search.md)\n').activities[0].steps[0].stories[0];
+  assert.equal(story.title, '搜尋');
+  assert.equal(story.link, null);
+  assert.equal(story.primary.target, '.scratch/catalog/issues/01-search.md');
+});
+
+test('fences close only with the same marker and sufficient length', () => {
+  const m = parseUsm('## A\n````markdown\n```\n- [ ] [[example]]\n~~~\n````\n- [ ] [[real]]\n');
+  assert.deepEqual(m.activities[0].steps[0].stories.map(s => s.link), ['real']);
+});

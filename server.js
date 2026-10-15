@@ -2,7 +2,7 @@
 'use strict';
 
 /**
- * scorecard viewer server (zero dependencies)
+ * scorecard viewer server
  *
  * 把 markdown 速記渲染成 User Story Map：
  *   ## Activity（backbone 層級一）· ### Step（backbone 層級二）
@@ -16,6 +16,8 @@
  * Endpoints:
  *   GET  /                viewer UI
  *   GET  /api/map         parsed story map as JSON (+ version for live reload)
+ *   GET  /api/card?line=<line>&version=<map version>   all card preview sections
+ *   GET  /api/document?path=<project-relative path>   original document as text
  *   GET  /api/feature?name=<wiki-link target>   feature file (Gherkin/md) content
  *   POST /api/move        drag & drop: move a story card to another cell
  *   POST /api/done        double-click: tick / untick a story card
@@ -28,6 +30,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { parseUsm } = require('./lib/parser');
 const { moveStory, setStoryDone, EditError } = require('./lib/writer');
+const { createDocuments, digest } = require('./lib/documents');
 
 function createViewer({ root = process.cwd(), mapFile } = {}) {
   const ROOT = fs.realpathSync(root);
@@ -39,33 +42,9 @@ function createViewer({ root = process.cwd(), mapFile } = {}) {
   }
 
   const MAP_FILE = path.resolve(ROOT, mapFile || defaultMapFile());
-  const FEATURES_DIR = path.resolve(ROOT, 'features'); // Gherkin 慣例目錄
-  const FEATURE_EXTS = ['.feature', '.md', '.feature.md'];
+  const documents = createDocuments(ROOT);
 
-  function findFeatureFile(name) {
-    // sanitize: forbid path traversal
-    if (name.includes('..') || path.isAbsolute(name)) return null;
-    const candidates = [];
-    for (const ext of FEATURE_EXTS) candidates.push(path.join(FEATURES_DIR, name + ext));
-    // also search one level of subdirectories
-    if (fs.existsSync(FEATURES_DIR)) {
-      for (const entry of fs.readdirSync(FEATURES_DIR, { withFileTypes: true })) {
-        if (entry.isDirectory()) {
-          for (const ext of FEATURE_EXTS)
-            candidates.push(path.join(FEATURES_DIR, entry.name, name + ext));
-        }
-      }
-    }
-    return candidates.find((p) => {
-      try {
-        const relative = path.relative(FEATURES_DIR, fs.realpathSync(p));
-        return relative !== '' && !relative.startsWith('..' + path.sep) && relative !== '..' &&
-          !path.isAbsolute(relative) && fs.statSync(p).isFile();
-      } catch { return false; }
-    }) || null;
-  }
-
-  function buildMap() {
+  function buildMap(includeSections = false) {
     let md = '';
     try {
       md = fs.readFileSync(MAP_FILE, 'utf8');
@@ -74,12 +53,29 @@ function createViewer({ root = process.cwd(), mapFile } = {}) {
     }
     const map = parseUsm(md);
     map.file = path.relative(ROOT, MAP_FILE);
-    // annotate each story with whether its wiki-linked feature file exists
+    const cache = new Map();
+    const previews = [];
     for (const a of map.activities)
       for (const s of a.steps)
-        for (const st of s.stories)
-          st.fileExists = st.link ? !!findFeatureFile(st.link) : null;
-    map.version = crypto.createHash('sha1').update(md).update(JSON.stringify(map)).digest('hex').slice(0, 12);
+        for (const st of s.stories) {
+          const sections = documents.storySections(st, MAP_FILE, cache);
+          st.preview = { notes: false, tickets: 0, documents: 0, features: 0, missing: 0, available: false };
+          for (const section of sections) {
+            if (section.error) st.preview.missing++;
+            else {
+              st.preview.available = true;
+              if (section.kind === 'notes') st.preview.notes = true;
+              else st.preview[{ ticket: 'tickets', document: 'documents', feature: 'features' }[section.kind]]++;
+            }
+          }
+          st.fileExists = st.sources.length ? sections.some(section => section.kind !== 'notes' && !section.error) : null;
+          st.previewVersion = digest(JSON.stringify(sections));
+          previews.push(st.previewVersion);
+          if (includeSections) st.sections = sections;
+        }
+    // Source-only changes refresh previews without invalidating map edits.
+    map.version = crypto.createHash('sha256').update(md).digest('hex').slice(0, 16);
+    map.viewVersion = digest(map.version + JSON.stringify(previews));
     return map;
   }
 
@@ -161,6 +157,10 @@ function createViewer({ root = process.cwd(), mapFile } = {}) {
       if (url.pathname === '/') {
         return send(res, 200, fs.readFileSync(path.join(__dirname, 'public', 'index.html')), 'text/html');
       }
+      if (url.pathname === '/vendor/markdown-it.js') {
+        const vendor = path.join(path.dirname(require.resolve('markdown-it/package.json')), 'dist/markdown-it.min.js');
+        return send(res, 200, fs.readFileSync(vendor), 'text/javascript');
+      }
       if (url.pathname === '/api/map') {
         return send(res, 200, JSON.stringify(buildMap()), 'application/json');
       }
@@ -172,13 +172,30 @@ function createViewer({ root = process.cwd(), mapFile } = {}) {
       }
       if (url.pathname === '/api/feature') {
         const name = url.searchParams.get('name') || '';
-        const file = findFeatureFile(name);
+        const file = documents.findFeatures(name).files[0];
         if (!file) return send(res, 404, JSON.stringify({ error: 'not found', name }), 'application/json');
         return send(res, 200, JSON.stringify({
           name,
           path: path.relative(ROOT, file),
           content: fs.readFileSync(file, 'utf8'),
         }), 'application/json');
+      }
+      if (url.pathname === '/api/card') {
+        const version = url.searchParams.get('version');
+        const line = Number(url.searchParams.get('line'));
+        if (!version || !Number.isInteger(line) || line < 1)
+          return send(res, 400, JSON.stringify({ error: 'line and version are required' }), 'application/json');
+        const map = buildMap(true);
+        if (map.error) return send(res, 404, JSON.stringify({ error: map.error }), 'application/json');
+        if (version !== map.version) return send(res, 409, JSON.stringify({ error: 'stale version' }), 'application/json');
+        const story = map.activities.flatMap(a => a.steps.flatMap(s => s.stories)).find(st => st.line === line);
+        if (!story) return send(res, 404, JSON.stringify({ error: 'card not found' }), 'application/json');
+        return send(res, 200, JSON.stringify({ title: story.title, line, file: map.file, version: map.version,
+          previewVersion: story.previewVersion, sections: story.sections }), 'application/json');
+      }
+      if (url.pathname === '/api/document') {
+        const document = documents.readDocument(url.searchParams.get('path'));
+        return document ? send(res, 200, document.content, 'text/plain') : send(res, 404, 'document not found', 'text/plain');
       }
       send(res, 404, 'not found', 'text/plain');
     } catch {

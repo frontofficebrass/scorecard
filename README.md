@@ -3,7 +3,7 @@
 把 Markdown 速記即時渲染成 **User Story Mapping** 圖形界面。
 
 Scorecard 包含可獨立安裝的 **USM 編寫 Skill** 與 **網頁 viewer**。Skill 讓 AI agent 正確編輯
-Markdown；viewer 在 host 上讀寫同一份檔案。Viewer 零相依，只需 Node.js ≥ 18；Skill 本身不需要 Node.js。
+Markdown；viewer 在 host 上讀寫同一份檔案。Viewer 使用 Node.js ≥ 18 與 markdown-it；Skill 本身不需要 Node.js。
 
 ## 安裝與開始使用
 
@@ -99,7 +99,7 @@ Agent（sandbox） → scorecard.md / features/ ← viewer（host） ← 瀏覽�
 Host 與 sandbox 必須讀寫**同一份專案檔案**。使用共用工作目錄時，agent 存檔後 viewer 會讀到變更，
 不需要讓 sandbox 啟動 server 或轉發 port。若使用獨立 clone，需先同步檔案，兩份工作目錄不會自動即時連動。
 
-瀏覽器每 1.5 秒偵測 map／feature 檔案狀態並重新渲染；可拖曳卡片調整位置、點兩下切換完成狀態，
+瀏覽器每 1.5 秒偵測 map 與引用文件的內容、存在狀態；已開啟的卡片預覽會同步更新並保留捲動位置。可拖曳卡片調整位置、點兩下切換完成狀態，
 結果寫回同一份 Markdown。
 
 <details>
@@ -117,6 +117,8 @@ Claude Code 可將目的目錄改成 `.claude/skills/`；若使用 Plugin，則�
 依第 2 步產生 `scorecard.md` 後，在 host 啟動 viewer：
 
 ```bash
+# 在 Scorecard 副本安裝依賴（首次使用或 lockfile 更新時）：
+npm --prefix /path/to/scorecard ci --omit=dev
 cd /path/to/your-project
 node /path/to/scorecard/server.js
 ```
@@ -168,16 +170,42 @@ Viewer 操作與安裝說明留在 README，編排 USM 時不需要載入。
 - 沒被分隔線收尾的 story（該 `###` 最後一段）落到自動追加、永遠排在最下面的 **Backlog** 泳道。
 - Release 泳道是全圖共用的，同名合併，依首次出現排序；分隔線只作用到該欄結束。Backlog 留給未收尾的 story 自動產生。
 - `###` 可以省略：story 直接寫在 `##` 底下時，那些卡片自成一欄接在該 activity 下方，step 卡從缺。
-- 點卡片會在側邊欄預覽對應的 feature 檔（`features/<name>.feature`，亦支援 `.md` 與一層子目錄）。
-- 還沒有 feature 檔的 story 以灰色虛線顯示，代表「還沒請 AI agent 寫規格」。
+- 點卡片會在側邊欄分區全部展開筆記、tickets／Markdown 文件與 feature 規格；各類內容可以同時存在。
+- 沒有任何可讀預覽內容且引用文件缺失的 story 才以灰色虛線顯示；有筆記或 ticket 時，不會因缺少 feature 而整張變灰。
+
+## 卡片筆記與多份文件預覽
+
+```markdown
+- [ ] [[search-by-keyword|關鍵字搜尋]]
+  - 支援書名與作者
+  - [ ] 空字串顯示提示
+    - 保留目前搜尋結果
+  - [Ticket 01](.scratch/catalog/issues/01-search.md)
+  - [Ticket 02](.scratch/catalog/issues/02-search-edge-cases.md)
+```
+
+未縮排的 checkbox 首行建立卡片；後續縮排至少兩個空格（或 tab）的內容屬於同一卡片，
+可包含多層清單、段落、驗收 checkbox 與 fenced code。中間空白行會保留，下一個未縮排內容結束卡片區塊。
+子 checkbox 不另生卡片，預覽中供閱讀；拖曳時會連同父卡片搬動。
+
+只有 Markdown ticket 時，直接寫 `- [ ] [搜尋](.scratch/catalog/issues/01-search.md)` 即可，
+不需要 `features/` 文件。其他專案內的 `.md`／`.feature` 文件也能透過標準 Markdown 連結加入。
+文件連結相對於 map 所在目錄；例如 `maps/product.md` 使用 `../.scratch/catalog/issues/01-search.md`。
+wiki-link 繼續從專案根目錄的 `features/` 查找，支援 `.feature`、`.md`、`.feature.md` 與一層子目錄。
+同名的不同格式會一起顯示；不同子目錄的同名規格出現歧義時，請用明確文件連結指定。
+
+側欄依「卡片筆記 → tickets／補充文件 → feature 規格」排列，同一份文件只展開一次。
+Markdown 會渲染標題、清單、表格、程式碼與唯讀 checkbox，Gherkin 保留語法上色。
+缺少一份來源只在該分區提示，其餘內容照常顯示。只自動展開卡片直接引用的文件，不遞迴載入文件內的其他引用；
+文件內連結依原始文件目錄解析，已展開的文件可直接跳至對應分區，其他本地 Markdown／feature 可另開原文。
 
 ## 在畫面上編輯（畫面 → markdown）
 
 | 操作 | 效果 | markdown 改動 |
 | --- | --- | --- |
-| 拖曳卡片到別格 | 換 release 泳道／step 欄位 | 把那一行搬到目標區段 |
+| 拖曳卡片到別格 | 換 release 泳道／step 欄位 | 把首行與縮排內文整塊搬到目標區段 |
 | 卡片上**點兩下** | 標記完成／未完成 | 該行 `- [ ]` ⇄ `- [x]` |
-| 點一下卡片 | 預覽 feature 檔 | 不改檔 |
+| 點一下卡片 | 預覽筆記與所有引用文件 | 不改檔 |
 
 點一下和點兩下共用同一張卡片，所以預覽會延後約 220ms 才打開——這段時間內若來了第二下，
 就當成「勾選」而不是「預覽」。
@@ -187,14 +215,14 @@ Viewer 操作與安裝說明留在 README，編排 USM 時不需要載入。
 卡片可以直接用滑鼠拖到任何一格（step 欄 × release 泳道），放開的瞬間 `scorecard.md`
 就被改寫，畫面隨即重繪：
 
-- **換 release**：卡片那一行被搬到目標 release 分隔線的上方。目標欄若還沒有這條泳道，
+- **換 release**：卡片區塊被搬到目標 release 分隔線的上方。目標欄若還沒有這條泳道，
   會依全圖泳道順序補一條 `<!-- ---- {Release 名稱} -->`。
-- **換 step**：同樣是搬那一行，只是搬進另一個 `###` 區段。
+- **換 step**：同樣是搬整個區塊，只是搬進另一個 `###` 區段。
 - **同格內上下拖**：調整 story 在泳道裡的順序（story map 的縱向即優先順序）。
 - 拖到卡片**上半部**會插在它上面，下半部則插在下面；藍色細線標示落點。
 
-改寫盡量最小：只有 story 那一行被搬動，list marker、`- [x]`、wiki-link、別名與行尾文字
-原樣保留，其他內容（含註解、程式碼區塊）一律不動。被搬空的 release 分隔線會**留在原地**——
+改寫盡量最小：只有 story 首行及其縮排內文被搬動，list marker、`- [x]`、連結、別名、行尾文字、
+縮排、內部空白行與 CRLF 原樣保留，其他內容一律不動。被搬空的 release 分隔線會**留在原地**——
 它仍宣告該泳道，泳道順序才不會因為一次拖曳而跳動，卡片也拖得回去。
 
 若在編輯期間 `scorecard.md` 被別人（或 agent）改過，該次拖曳／勾選會被拒絕並提示重試，
@@ -214,7 +242,7 @@ Skill 以 map 檔為準，每次修改前重讀，保留使用者在 viewer 中�
 > 讀 scorecard.md，把還沒有 feature 檔的 story 都到 features/ 逐一寫好。
 
 Agent 此時才讀取 Gherkin 參考規則，依 wiki-link 建立 `features/*.feature`。
-尚無 feature 檔的卡片會在 viewer 顯示灰色虛線，檔案建立後即可預覽。
+尚無預覽內容的規格卡片會在 viewer 顯示灰色虛線，檔案建立後即可預覽。
 
 ## 匯入 to-tickets 本地工作單
 
@@ -245,22 +273,24 @@ node /path/to/scorecard/bin/import-tickets.js .scratch/catalog/issues/01-search.
 尚未完成的前置工作應在同一或更早 Release；同一 Release 可以包含有先後依賴的多張 tickets，不必每一層依賴都拆成一個 Release。
 匯入只讀寫檔案，不會啟動 server。未指定 map 時依序使用 `scorecard.md`、`usm.md`，都不存在則新建 `scorecard.md`。
 
-- 一張 ticket 對應一張卡，完整內容（包含驗收條件與 Blocked by）存為 `features/ticket-<hash>.md`，可在現有側欄預覽文字。
+- 一張 ticket 預設對應一張卡，直接連原始文件，不建立 `features/` 副本；完整內容（包含驗收條件與 Blocked by）在側欄預覽。
 - 穩定 ID 是 feature 目錄名稱加 ticket 編號；更改標題或檔名 slug 不會新增卡片。改 feature 名稱或編號則視為新 ticket。
-- 重新匯入更新副本、卡片標題和完成狀態，保留使用者調整的欄位、Release 與排序。相同內容重匯不改檔案。
+- 重新匯入更新來源連結、卡片標題和完成狀態，保留人工筆記、欄位、Release 與排序。相同內容重匯不改檔案。
 - **執行狀態以來源 `**Status:**` 為準**：`done`／`completed`／`closed`／`resolved` 為完成，其餘為未完成。看板雙擊不回寫來源，下次匯入會依來源更新勾選。
-- 來源刪除不會自動刪除卡片；匯入副本請勿手改或另建同名 `.feature`。來源保留原樣，沒有遠端 tracker 寫入。
+- 來源刪除不會自動刪除卡片。舊匯入副本會依來源標記讀原檔；原檔不存在時顯示明確標示的匯入快照。重匯將舊卡原位轉為直接連結，保留舊副本。
+- 可以在同一卡片的縮排內容加入多張 ticket；這些附件不作為父卡片的匯入身分，也不依其狀態重寫父卡片。
 
-依賴由 Skill 在編排時考慮；GUI 不負責依賴圖、自動判斷可開始工作或派工。目前匯入為手動觸發的單向更新，沒有即時或雙向同步。`ready-for-agent` 不表示沒有阻擋依賴。
-匯入的來源、副本與 map 必須位於專案內，路徑不可經過 symlink，map 必須是獨立的 `.md` 檔案。
-一般 I/O 失敗會嘗試回復已寫入檔案；程序被強制終止或斷電不保證多檔案交易完整，修復原因後可重新匯入。
+依賴由 Skill 在編排時考慮；GUI 不負責依賴圖、自動判斷可開始工作或派工。來源內容即時更新預覽；
+卡片標題與完成勾選仍由重匯更新，不回寫來源，也不依多張 tickets 的狀態推算父卡片完成度。`ready-for-agent` 不表示沒有阻擋依賴。
+匯入的來源與 map 必須位於專案內，路徑不可經過 symlink，map 必須是獨立的 `.md` 檔案。
+匯入先驗證整批來源，再以暫存檔原子替換 map；寫入失敗保留原 map，來源 tickets 與舊副本不被改寫。
 本地 ticket 標題需為 `# NN: 標題`，編號與檔名一致，並有 `**Status:**`；卡片標題不接受 `[`、`]`、`|`。
 只有 Skill 的環境也可請 agent 依 [匯入規則](skills/scorecard/references/tickets.md) 直接編輯，不必安裝 CLI。
 
 ## 完整範例
 
-根目錄的 `scorecard.md` 記錄 Scorecard 自身的功能；書店示範與對應規格位於 `examples/bookstore/`。
-在 host 執行下列命令即可預覽有規格連結的範例：
+根目錄的 `scorecard.md` 記錄 Scorecard 自身的功能；書店示範包含縮排筆記、兩張 Markdown tickets 與 Gherkin 規格，位於 `examples/bookstore/`。
+安裝本機依賴後，在 host 執行下列命令即可預覽：
 
 ```bash
 cd examples/bookstore
@@ -273,15 +303,21 @@ node ../../server.js
 npm test        # parser / writer / tickets / server API 測試（node:test）
 ```
 
-- `lib/parser.js` — markdown → USM 結構（`activities` / `steps` / `stories` / `releases`）
+- `lib/blocks.js` — parser／writer／匯入共用的卡片與程式碼區塊邊界
+- `lib/parser.js` — markdown → USM 結構（含卡片內文與文件引用）
+- `lib/markdown.js` / `lib/documents.js` — Markdown 引用解析、原始文件查找與多來源預覽
 - `lib/writer.js` — 反向：把畫面上的編輯（`moveStory` / `setStoryDone`）寫回 markdown
 - `lib/tickets.js` / `bin/import-tickets.js` — 本地 tickets 匯入、來源識別與原位更新
-- `server.js` — 靜態頁 + `/api/map`、`/api/feature`、`/api/move`、`/api/done`；
+- `server.js` — 靜態頁 + `/api/map`、`/api/card`、`/api/document`、舊版 `/api/feature`、`/api/move`、`/api/done`；
   以 cwd 解析 map 檔，僅監聽 `127.0.0.1`（本機）
 - `public/index.html` — 前端渲染、拖放與勾選（無框架）
 
 兩個寫入端點都要求 `Content-Type: application/json` 與非空的 `version`；缺少版本回 400，版本過期回 409。
 請求來自瀏覽器時必須與 viewer 同來源。兩個端點回傳改寫後的完整 map（與 `/api/map` 同格式）：
+
+`/api/map` 的 `version` 只追蹤 map 原文，供編輯與 `/api/card?line=<行號>&version=<版本>` 檢查；
+`viewVersion` 另追蹤引用文件內容與缺檔狀態，讓來源變更刷新預覽而不使 map 編輯失效。
+`/api/card` 回傳依序排列的 `sections`；`/api/document?path=<專案相對路徑>` 提供專案內 Markdown／feature 原文。
 
 ```jsonc
 // POST /api/move —— 拖曳

@@ -12,7 +12,7 @@ allowed-tools: Bash, Read
 
 1. 先解析 map 與 port（下文 `<port>` 代入實際數字），再確認 viewer 是否已在該 port 上跑：`curl -s -m 2 127.0.0.1:<port>/api/map -o /dev/null -w '%{http_code}'`。
    若回 200，代表已在運行，直接告訴使用者網址即可，不要重複啟動。
-2. 若尚未運行，在**當前目錄**背景啟動 plugin 內建的 server（不需要全域安裝）：
+2. 若尚未運行，先在 host 安裝 plugin 的 Node.js 依賴（首次使用或 lockfile 更新時）：`npm --prefix "${CLAUDE_PLUGIN_ROOT}" ci --omit=dev`，再在**當前目錄**背景啟動 plugin 內建的 server（不需要全域安裝）：
    ```bash
    nohup node "${CLAUDE_PLUGIN_ROOT}/server.js" "<map-file>" "<port>" > /tmp/scorecard.log 2>&1 &
    ```
