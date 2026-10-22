@@ -173,6 +173,25 @@ Viewer 操作與安裝說明留在 README，編排 USM 時不需要載入。
 - 點卡片會在側邊欄分區全部展開筆記、tickets／Markdown 文件與 feature 規格；各類內容可以同時存在。
 - 沒有任何可讀預覽內容且引用文件缺失的 story 才以灰色虛線顯示；有筆記或 ticket 時，不會因缺少 feature 而整張變灰。
 
+## spots-route 圖
+
+在看板上按 **Tab**，或點頁首的視圖按鈕，即可在 USM 與 **spots-route** 圖之間切換。
+spots-route 是一覽大量卡片的緊湊視圖，省略 Activity 與 Step，將同一份卡片顯示為圓點：
+
+- **route（右側）**：依 release 分組，保留原看板從左到右、同欄由上到下的卡片順序。
+  同一 release 固定單列、箭頭向右，最右邊以 S 形路線接到下一個有卡片的 release 最左邊。
+  卡片超出視窗時可左右捲動。
+  名稱顯示在圓點下方，超長以 `…` 截斷，滑鼠停留可看完整名稱。
+  同一 step 以背景色帶跨 release 串聯，相鄰 step 交替使用兩種淺藍。
+  色帶依各 release 的卡片數變寬、變窄，沒有卡片時縮成 6px 細線；相鄰 step 的色帶間距為 0。
+  跨 release 的連接段採直角折線，最小厚度為 6px；release 間距會依轉折數量增加，保留各條色帶的厚度與順序。
+- **spots（左側）**：所有 Backlog 卡片由上到下排列，名稱顯示在圓點右側。
+- **完成狀態**：紅點代表完成，黑點代表未完成。
+
+圓點可點擊預覽、點兩下切換完成狀態，與 USM 共用同一份 Markdown。
+即時更新與勾選後會維持目前視圖及水平捲動位置；調整視窗寬度時，每個 release 仍維持單列。
+輸入欄位、預覽側欄與 Shift+Tab 保留原有的鍵盤操作。
+
 ## 卡片筆記與多份文件預覽
 
 ```markdown
@@ -300,7 +319,7 @@ node ../../server.js
 ## 開發
 
 ```bash
-npm test        # parser / writer / tickets / server API 測試（node:test）
+npm test        # parser / writer / tickets / server API / UI 測試（node:test）
 ```
 
 - `lib/blocks.js` — parser／writer／匯入共用的卡片與程式碼區塊邊界

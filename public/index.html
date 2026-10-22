@@ -13,13 +13,17 @@
     --card-done: #d3f9d8;
     --lane-label: #868e96;
     --border: #dee2e6;
+    --spot-todo: #212529;
+    --spot-done: #e03131;
+    --step-band-light: #e2f1fc;
+    --step-band-dark: #c9e3f7;
   }
   * { box-sizing: border-box; margin: 0; }
   body { font-family: system-ui, "Noto Sans TC", sans-serif; background: var(--bg); color: #212529; }
 
   header {
     position: sticky; top: 0; z-index: 20;
-    display: flex; align-items: baseline; gap: 12px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
     padding: 12px 20px; background: #fff; border-bottom: 1px solid var(--border);
   }
   header h1 { font-size: 18px; }
@@ -30,6 +34,17 @@
   header .legend .l-done::before  { color: #69db7c; }
   header .legend .l-miss::before  { color: #ced4da; }
   header .legend .l-drag::before  { content: "⠿ "; color: #adb5bd; }
+  .view-toggle {
+    display: inline-flex; align-items: center; gap: 10px; padding: 5px 9px;
+    background: #fff; border: 1px solid var(--border); border-radius: 5px;
+    color: #495057; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .view-toggle:hover { background: #f1f3f5; }
+  .view-toggle kbd { color: var(--lane-label); font: 11px ui-monospace, monospace; }
+  body[data-view="spots-route"] .legend .l-todo::before { content: "● "; color: var(--spot-todo); }
+  body[data-view="spots-route"] .legend .l-done::before { content: "● "; color: var(--spot-done); }
+  body[data-view="spots-route"] .legend .l-miss { display: none; }
+  body[data-view="spots-route"] .legend .l-drag::before { content: ""; }
 
   #board { overflow-x: auto; padding: 20px; }
   .grid { display: grid; gap: 8px; align-items: stretch; min-width: max-content; }
@@ -78,6 +93,47 @@
   .card.missing { background: #f1f3f5; border-style: dashed; border-color: #adb5bd; color: #495057; }
   .card .mark { position: absolute; right: 6px; top: 4px; font-size: 11px; }
   .card .sources { display: block; margin-top: 4px; font-size: 10px; color: #687076; }
+
+  .spots-route {
+    display: grid; grid-template-columns: clamp(132px, 20vw, 224px) minmax(160px, 1fr);
+    gap: 24px; width: max-content; min-width: max(316px, 100%);
+  }
+  .spots-area { min-width: 0; padding-right: 16px; border-right: 1px solid var(--border); }
+  .route-area { min-width: 0; }
+  .spots-route h2 { font-size: 14px; font-weight: 600; margin-bottom: 16px; }
+  .spots-route h2 span { margin-left: 8px; color: var(--lane-label); font-size: 11px; font-weight: 400; }
+  .route-map { position: relative; isolation: isolate; width: max-content; min-width: 100%; }
+  .route-release { position: relative; z-index: 2; padding-bottom: 30px; }
+  .route-release:last-child { padding-bottom: 0; }
+  .route-release h3 { font-size: 12px; font-weight: 500; color: #687076; margin-bottom: 8px; padding-left: 24px; }
+  .route-track { width: max-content; padding: 10px 24px; }
+  .route-nodes {
+    display: flex; gap: 0; width: max-content; height: 48px;
+  }
+  .route-step {
+    display: grid; flex-shrink: 0; grid-auto-flow: column; grid-auto-columns: 104px;
+    grid-template-rows: 48px; column-gap: 8px; width: max-content; min-width: 6px;
+  }
+  .route-bands, .route-arrows { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .route-bands { z-index: 0; }
+  .route-arrows { z-index: 1; }
+  .step-band { fill: var(--step-band-light); }
+  .step-band.alt { fill: var(--step-band-dark); }
+  .route-link { fill: none; stroke: #adb5bd; stroke-width: 1.25; }
+  .feature-node {
+    display: flex; flex-direction: column; align-items: center; min-width: 0;
+    padding: 0 4px; border: 0; border-radius: 4px; background: transparent;
+    color: inherit; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .feature-dot { display: block; flex-shrink: 0; width: 14px; height: 14px; border-radius: 50%; background: var(--spot-todo); }
+  .feature-node.done .feature-dot { background: var(--spot-done); }
+  .feature-node:hover .feature-dot { box-shadow: 0 0 0 5px rgba(33,37,41,.08); }
+  .feature-node:focus-visible, .view-toggle:focus-visible { outline: 2px solid var(--activity); outline-offset: 3px; }
+  .feature-label { display: block; width: 100%; min-width: 0; margin-top: 8px; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .spots-nodes { display: flex; flex-direction: column; gap: 2px; }
+  .spots-nodes .feature-node { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 32px; padding: 5px 0; text-align: left; }
+  .spots-nodes .feature-label { margin-top: 0; }
+  .spots-empty, .route-empty { color: var(--lane-label); font-size: 12px; padding: 10px 0; }
 
   #drawer {
     position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 92vw);
@@ -137,11 +193,14 @@
 <header>
   <h1 id="title">⚾ Scorecard</h1>
   <span class="file" id="file"></span>
+  <button id="view-toggle" class="view-toggle" type="button" aria-pressed="false" aria-keyshortcuts="Tab" title="切換 USM / spots-route（Tab）">
+    <span id="view-label">USM</span><kbd>Tab</kbd>
+  </button>
   <span class="legend">
     <span class="l-todo">待辦</span>
     <span class="l-done">完成</span>
     <span class="l-miss">尚無可預覽內容</span>
-    <span class="l-drag">拖曳換 release／step · 點兩下勾選完成</span>
+    <span class="l-drag" id="interaction-hint">拖曳換 release／step · 點兩下勾選完成</span>
   </span>
 </header>
 <div id="board"></div>
@@ -162,6 +221,9 @@ let version = null;
 let viewVersion = null;
 let opened = null;
 let previewRequest = 0;
+let currentMap = null;
+let activeView = 'usm';
+let routeObserver = null;
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -410,8 +472,235 @@ const moveCard = (payload) => postEdit('/api/move', payload, '移動');
 // anything else the outcome is still what the user saw themselves ask for.
 const toggleDone = (story) => postEdit('/api/done', { line: story.line, done: !story.done }, '勾選');
 
+/* ---------- compact spots-route view ---------- */
+
+function updateViewControls() {
+  const compact = activeView === 'spots-route';
+  document.body.dataset.view = activeView;
+  document.getElementById('view-label').textContent = compact ? 'spots-route' : 'USM';
+  document.getElementById('view-toggle').setAttribute('aria-pressed', String(compact));
+  document.getElementById('view-toggle').setAttribute('aria-label', compact ? '切換至 USM 視圖' : '切換至 spots-route 圖');
+  document.getElementById('interaction-hint').textContent = compact
+    ? '點擊預覽 · 點兩下勾選完成' : '拖曳換 release／step · 點兩下勾選完成';
+}
+
+function toggleView() {
+  if (dragging) return;
+  clearTimeout(clickTimer);
+  clickTimer = null;
+  activeView = activeView === 'usm' ? 'spots-route' : 'usm';
+  if (currentMap) render(currentMap); else updateViewControls();
+}
+
+document.getElementById('view-toggle').addEventListener('click', toggleView);
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Tab' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || e.repeat || e.defaultPrevented || dragging) return;
+  // Preserve editing and keyboard navigation inside the preview drawer.
+  if (e.target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], #drawer.open')) return;
+  e.preventDefault();
+  toggleView();
+});
+
+function featureNode(story) {
+  const node = document.createElement('button');
+  node.type = 'button';
+  node.className = 'feature-node' + (story.done ? ' done' : '');
+  node.dataset.line = story.line;
+  const status = story.done ? '已完成' : '未完成';
+  node.setAttribute('aria-label', story.title + '，' + status);
+  node.title = story.title + '\n' + status + '\n點擊預覽 · 點兩下切換完成狀態';
+  const dot = document.createElement('span');
+  dot.className = 'feature-dot';
+  dot.setAttribute('aria-hidden', 'true');
+  const label = document.createElement('span');
+  label.className = 'feature-label';
+  label.textContent = story.title;
+  node.appendChild(dot);
+  node.appendChild(label);
+  bindClicks(node, story);
+  return node;
+}
+
+function routePath(from, to, width, returnY) {
+  const start = from.x + from.radius + 3;
+  const end = to.x - to.radius - 4;
+  if (Math.abs(from.y - to.y) < 1) return `M ${start} ${from.y} H ${end}`;
+
+  // Each release occupies one row. Return below its labels, then enter the
+  // next release from the left, leaving room for that release's heading.
+  const left = 3, right = width - 3, bend = 10;
+  const middle = returnY;
+  return `M ${start} ${from.y} H ${right - bend} Q ${right} ${from.y} ${right} ${from.y + bend}` +
+    ` V ${middle - bend} Q ${right} ${middle} ${right - bend} ${middle}` +
+    ` H ${left + bend} Q ${left} ${middle} ${left} ${middle + bend}` +
+    ` V ${to.y - bend} Q ${left} ${to.y} ${left + bend} ${to.y} H ${end}`;
+}
+
+function bandTransition(from, to, minThickness = 6) {
+  const source = [...from.map(segment => segment.left), from.at(-1).right];
+  const target = [...to.map(segment => segment.left), to.at(-1).right];
+  const current = [...source];
+  const pending = source.map((x, boundary) => boundary).filter(boundary => Math.abs(source[boundary] - target[boundary]) > .01);
+  const order = [];
+  // Move one shared edge at a time, keeping both neighboring bands wide
+  // enough. Outward moves free space for the remaining inward moves.
+  while (pending.length) {
+    const index = pending.findIndex(boundary =>
+      (boundary === 0 || target[boundary] - current[boundary - 1] >= minThickness - .01) &&
+      (boundary === current.length - 1 || current[boundary + 1] - target[boundary] >= minThickness - .01));
+    if (index < 0) throw new Error('背景色帶寬度不足，無法安排連接段');
+    const [boundary] = pending.splice(index, 1);
+    current[boundary] = target[boundary];
+    order.push(boundary);
+  }
+  return { source, target, order, minGap: (order.length + 1) * minThickness };
+}
+
+function bandEdgePath(transition, boundary, top, bottom, reverse = false) {
+  const rank = transition.order.indexOf(boundary);
+  if (rank < 0) return ` V ${reverse ? top : bottom}`;
+  const y = top + (bottom - top) * (rank + 1) / (transition.order.length + 1);
+  return reverse ? ` V ${y} H ${transition.source[boundary]} V ${top}`
+    : ` V ${y} H ${transition.target[boundary]} V ${bottom}`;
+}
+
+function stepBandPath(segments, transitions, step) {
+  const first = segments[0], last = segments.at(-1);
+  let path = `M ${first.left} ${first.top} H ${first.right} V ${first.bottom}`;
+  for (let i = 1; i < segments.length; i++) {
+    const current = segments[i];
+    path += bandEdgePath(transitions[i - 1], step + 1, segments[i - 1].bottom, current.top) + ` V ${current.bottom}`;
+  }
+  path += ` H ${last.left} V ${last.top}`;
+  for (let i = segments.length - 2; i >= 0; i--) {
+    const current = segments[i];
+    path += bandEdgePath(transitions[i], step, current.bottom, segments[i + 1].top, true) + ` V ${current.top}`;
+  }
+  return path + ' Z';
+}
+
+function drawRoutes() {
+  const routeMap = document.getElementById('board').querySelector('.route-map');
+  if (!routeMap) return;
+  const bounds = routeMap.getBoundingClientRect();
+  if (!bounds.width) return;
+  const rows = [...routeMap.querySelectorAll('.route-track')].map(track => {
+    const trackBounds = track.getBoundingClientRect();
+    return { width: trackBounds.right - bounds.left, returnY: trackBounds.bottom - bounds.top + 12,
+      steps: [...track.querySelectorAll('.route-step')].map(step => {
+        const rect = step.getBoundingClientRect();
+        return { left: rect.left - bounds.left, right: rect.right - bounds.left,
+          top: rect.top - bounds.top - 6, bottom: rect.bottom - bounds.top + 6 };
+      }),
+      points: [...track.querySelectorAll('.feature-dot')].map(dot => {
+        const rect = dot.getBoundingClientRect();
+        return { x: rect.left + rect.width / 2 - bounds.left, y: rect.top + rect.height / 2 - bounds.top, radius: rect.width / 2 };
+      }) };
+  });
+  const transitions = rows.slice(1).map((row, index) => bandTransition(rows[index].steps, row.steps));
+  const releases = routeMap.querySelectorAll('.route-release');
+  let resized = false;
+  transitions.forEach((transition, index) => {
+    const gap = rows[index + 1].steps[0].top - rows[index].steps[0].bottom;
+    if (gap < transition.minGap - .01) {
+      const release = releases[index];
+      const padding = parseFloat(release.style.paddingBottom) || 30;
+      release.style.paddingBottom = (padding + transition.minGap - gap) + 'px';
+      resized = true;
+    }
+  });
+  if (resized) return drawRoutes();
+  const bands = routeMap.querySelector('.route-bands');
+  bands.setAttribute('viewBox', `0 0 ${bounds.width} ${bounds.height}`);
+  bands.innerHTML = rows[0].steps.map((_, step) => '<path class="step-band' + (step % 2 ? ' alt' : '') +
+    '" data-step="' + step + '" d="' + stepBandPath(rows.map(row => row.steps[step]), transitions, step) + '"/>').join('');
+  const paths = [];
+  rows.forEach((row, index) => {
+    row.points.slice(1).forEach((point, i) => paths.push(routePath(row.points[i], point, row.width)));
+    const next = rows[index + 1];
+    if (next) paths.push(routePath(row.points.at(-1), next.points[0], row.width, row.returnY));
+  });
+  const svg = routeMap.querySelector('.route-arrows');
+  svg.setAttribute('viewBox', `0 0 ${bounds.width} ${bounds.height}`);
+  svg.innerHTML = '<defs><marker id="route-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">' +
+    '<path d="M 0 0 L 7 3.5 L 0 7 Z" fill="#adb5bd"/></marker></defs>' +
+    paths.map(path => '<path class="route-link" d="' + path + '" marker-end="url(#route-arrow)"/>').join('');
+}
+
+function renderSpotsRoute(map, board) {
+  const steps = map.activities.flatMap(a => a.steps.map(step => ({ activity: a.title, step })));
+  const stories = steps.flatMap(s => s.step.stories);
+  const releases = map.releases.map((title, index) => ({ title, index, stories: stories.filter(s => s.release === index) }));
+  const backlog = releases.filter(r => r.title === 'Backlog').flatMap(r => r.stories);
+  const routes = releases.filter(r => r.title !== 'Backlog' && r.stories.length);
+  const layout = document.createElement('div');
+  layout.className = 'spots-route';
+  const spots = document.createElement('aside');
+  spots.className = 'spots-area';
+  spots.innerHTML = '<h2>spots<span>Backlog · ' + backlog.length + '</span></h2>';
+  const spotsNodes = document.createElement('div');
+  spotsNodes.className = 'spots-nodes';
+  for (const story of backlog) spotsNodes.appendChild(featureNode(story));
+  if (!backlog.length) spotsNodes.innerHTML = '<p class="spots-empty">Backlog 目前沒有卡片</p>';
+  spots.appendChild(spotsNodes);
+  layout.appendChild(spots);
+
+  const route = document.createElement('section');
+  route.className = 'route-area';
+  route.innerHTML = '<h2>route<span>' + routes.reduce((count, r) => count + r.stories.length, 0) + ' features</span></h2>';
+  const routeMap = document.createElement('div');
+  routeMap.className = 'route-map';
+  const bands = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  bands.setAttribute('class', 'route-bands');
+  bands.setAttribute('aria-hidden', 'true');
+  routeMap.appendChild(bands);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'route-arrows');
+  svg.setAttribute('aria-hidden', 'true');
+  routeMap.appendChild(svg);
+  for (const release of routes) {
+    const section = document.createElement('section');
+    section.className = 'route-release';
+    const heading = document.createElement('h3');
+    heading.textContent = release.title;
+    section.appendChild(heading);
+    const track = document.createElement('div');
+    track.className = 'route-track';
+    track.dataset.release = release.index;
+    const nodes = document.createElement('div');
+    nodes.className = 'route-nodes';
+    steps.forEach(({ activity, step }, index) => {
+      const group = document.createElement('div');
+      group.className = 'route-step';
+      group.dataset.step = index;
+      group.title = [activity, step.title].filter(Boolean).join('／');
+      for (const story of step.stories) if (story.release === release.index) group.appendChild(featureNode(story));
+      nodes.appendChild(group);
+    });
+    track.appendChild(nodes);
+    section.appendChild(track);
+    routeMap.appendChild(section);
+  }
+  if (routes.length) route.appendChild(routeMap);
+  else route.innerHTML += '<p class="route-empty">尚無排入 release 的卡片</p>';
+  layout.appendChild(route);
+  const scrollLeft = board.scrollLeft;
+  board.innerHTML = '';
+  board.appendChild(layout);
+  board.scrollLeft = scrollLeft;
+  drawRoutes();
+  if (typeof ResizeObserver === 'function') {
+    routeObserver = new ResizeObserver(drawRoutes);
+    routeObserver.observe(route);
+  }
+}
+
 function render(map) {
   if (map.version !== version) { clearTimeout(clickTimer); clickTimer = null; }
+  currentMap = map;
+  routeObserver?.disconnect();
+  routeObserver = null;
+  updateViewControls();
   version = map.version;
   viewVersion = map.viewVersion;
   if (!map.error) syncDrawer(map); else closeDrawer();
@@ -422,6 +711,7 @@ function render(map) {
   document.getElementById('warnings').textContent = (map.warnings || []).join('  ·  ');
 
   if (map.error) { board.innerHTML = '<div id="empty">' + esc(map.error) + '</div>'; return; }
+  if (activeView === 'spots-route') { renderSpotsRoute(map, board); return; }
 
   const steps = [];
   for (const a of map.activities) for (const s of a.steps) steps.push({ activity: a, step: s });
